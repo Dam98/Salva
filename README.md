@@ -8,7 +8,39 @@ pronto da incollare, più il **piano di controllo in CSV**.
 Gira in locale sul PC (Windows) e si usa dal browser: i file non escono dal PC, tranne il disegno
 quando si usa l'OCR cloud LlamaParse.
 
-## Installazione (Windows)
+## Webapp online (Render.com)
+
+Il repository contiene `Dockerfile` e `render.yaml`: Render costruisce l'immagine (con Tesseract già
+installato) e la pubblica su un indirizzo tipo `https://alinea-xxxx.onrender.com`, protetta da password.
+
+1. Crea un account su <https://render.com> (va bene "Sign in with GitHub").
+2. Dashboard → **New** → **Blueprint** → collega GitHub e dai accesso al repository **Dam98/Salva**
+   (è privato: nella finestra di GitHub scegli *Only select repositories* → Salva).
+3. Seleziona il repository: Render legge `render.yaml` e chiede i valori dei segreti:
+   - `ALINEA_PASSWORD`: la password da dare a chi deve usare la webapp;
+   - `LLAMA_CLOUD_API_KEY`: la tua chiave LlamaParse (<https://cloud.llamaindex.ai> → API Keys).
+     Se la lasci vuota le scansioni vengono lette con Tesseract.
+   - `LLAMA_REGION` è `eu`: cambialo in `us` se il tuo account LlamaParse è sul server USA.
+4. **Apply**. La prima build richiede qualche minuto; poi apri l'indirizzo del servizio.
+
+Da sapere sul piano gratuito:
+- il servizio **si addormenta dopo 15 minuti** senza visite: la prima apertura successiva impiega circa un
+  minuto;
+- 512 MB di RAM: bastano per pezzi normali; per STEP molto grandi (oltre 20-30 MB) serve il piano
+  *Starter*;
+- i file caricati restano sul server solo per la durata dell'analisi (cancellati dopo 2 ore o al riavvio);
+- ogni `git push` sul branch collegato ripubblica automaticamente.
+
+Per cambiare password o chiave: servizio *alinea* → **Environment** → modifica → *Save changes*.
+
+La stessa immagine gira su qualsiasi server con Docker:
+
+```
+docker build -t alinea .
+docker run -p 10000:10000 -e ALINEA_PASSWORD=... -e LLAMA_CLOUD_API_KEY=... alinea
+```
+
+## Installazione locale (Windows)
 
 1. Installa **Python 3.10 o superiore** da <https://www.python.org/downloads/>, spuntando
    *"Add python.exe to PATH"*.

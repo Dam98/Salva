@@ -1,0 +1,18 @@
+# Blueprint Render: Dashboard > New > Blueprint > seleziona il repository Dam98/Salva
+services:
+  - type: web
+    name: alinea
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ALINEA_PASSWORD        # password condivisa per entrare nella webapp
+        sync: false
+      - key: LLAMA_CLOUD_API_KEY    # chiave LlamaParse (cloud.llamaindex.ai > API Keys)
+        sync: false
+      - key: LLAMA_REGION           # eu se l'account è su cloud.eu.llamaindex.ai, altrimenti us
+        value: eu
+      - key: ALINEA_SECRET          # firma dei cookie di sessione
+        generateValue: true

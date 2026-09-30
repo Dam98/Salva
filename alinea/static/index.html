@@ -16,6 +16,7 @@
     <span data-step="review">3 · Revisione ed export</span>
   </nav>
   <button id="btnSettings" class="ghost" title="Impostazioni">⚙ Impostazioni</button>
+  <button id="btnLogout" class="ghost hidden" title="Esci">Esci</button>
 </header>
 
 <!-- STEP 1 -->
@@ -119,11 +120,12 @@
     <h2>Impostazioni</h2>
     <fieldset>
       <legend>Lettura disegni (OCR)</legend>
-      <label class="field">Chiave API LlamaParse
+      <p id="srvKey" class="srv-key hidden"></p>
+      <label class="field local-only">Chiave API LlamaParse
         <input name="llama_api_key" type="password" placeholder="llx-…  (lascia vuoto per non cambiarla)" autocomplete="off">
         <small id="keyHint">Gratuita (crediti mensili) su <b>cloud.llamaindex.ai</b> → API Keys.</small>
       </label>
-      <label class="field">Regione account LlamaParse
+      <label class="field local-only">Regione account LlamaParse
         <select name="llama_region"><option value="eu">Europa</option><option value="us">USA</option></select>
       </label>
       <label class="field">Modalità LlamaParse

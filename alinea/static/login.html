@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alinea · Accesso</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%230b6bcb' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%230b6bcb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="login">
+  <form id="f" class="runbox">
+    <div class="brand"><span class="logo">◎</span> Alinea</div>
+    <p class="hint">CAD + disegno → routine di misura PC-DMIS</p>
+    <label class="field">Password
+      <input id="pw" type="password" autocomplete="current-password" autofocus required>
+    </label>
+    <div class="row actions"><button class="primary" type="submit">Entra</button></div>
+    <p id="err" class="warn hidden"></p>
+  </form>
+</main>
+<script>
+document.getElementById("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = document.getElementById("err");
+  err.classList.add("hidden");
+  const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: document.getElementById("pw").value }) });
+  if (r.ok) { location.href = "/"; return; }
+  let m = "Accesso non riuscito";
+  try { m = (await r.json()).detail || m; } catch (x) { /* */ }
+  err.textContent = m; err.classList.remove("hidden");
+});
+</script>
+</body>
+</html>

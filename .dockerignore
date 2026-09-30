@@ -1,0 +1,8 @@
+.git
+.venv
+**/__pycache__
+.pytest_cache
+tests
+impostazioni.json
+avvia.bat
+avvia.sh

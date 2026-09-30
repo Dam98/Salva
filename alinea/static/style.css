@@ -103,9 +103,10 @@ th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px
 td { border-bottom: 1px solid var(--line); padding: 4px; vertical-align: top; }
 tr.sel td { background: var(--sel); }
 tr.off td { opacity: .5; }
-td input.num { width: 70px; }
-.table-wrap table { min-width: 760px; }
-td select { max-width: 190px; font-size: 12px; padding: 3px 4px; }
+td input.num { width: 62px; }
+.table-wrap table { min-width: 720px; }
+td .lbl { max-width: 170px; }
+td select { max-width: 165px; font-size: 12px; padding: 3px 4px; }
 td .lbl { font-weight: 600; }
 td .sub { font-size: 11px; color: var(--muted); margin-top: 2px; max-width: 260px; }
 .badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
@@ -132,3 +133,7 @@ legend { font-weight: 600; padding: 0 6px; }
 .two .field input { min-width: 0; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
   padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 20; }
+.login { display: flex; justify-content: center; padding-top: 12vh; }
+.login .runbox { width: 100%; max-width: 380px; margin: 0 16px; display: flex; flex-direction: column; gap: 12px; }
+.login .field input { min-width: 0; width: 100%; }
+.srv-key { font-size: 13px; color: var(--muted); }

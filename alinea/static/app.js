@@ -28,6 +28,7 @@ function show(step) {
 }
 async function api(url, opts = {}) {
   const r = await fetch(url, opts);
+  if (r.status === 401 && !url.startsWith("/api/login")) { location.href = "/login"; throw new Error("Accesso richiesto"); }
   if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) { /* */ } throw new Error(m); }
   return r.json();
 }
@@ -60,11 +61,24 @@ function wireDrop(dropSel, inputSel, kind) {
   drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) setFile(kind, f); });
 }
 
+// impostazioni scelte dall'utente: in modalità web restano nel suo browser
+const USER_KEYS = ["llama_parse_mode", "reader_mode", "general_class", "probe", "stylus_diameter", "clearance",
+  "circle_hits", "plane_hits", "cylinder_min_length", "tip_step", "manual_alignment"];
+const LS_KEY = "alinea_impostazioni";
+function localPrefs() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { return {}; } }
+function userSettings() {
+  const out = {};
+  for (const k of USER_KEYS) if (S.settings && S.settings[k] !== undefined) out[k] = S.settings[k];
+  return out;
+}
 async function loadSettings() {
   S.settings = await api("/api/settings");
+  if (S.settings.web) Object.assign(S.settings, localPrefs());
   const s = S.settings;
+  $("#btnLogout").classList.toggle("hidden", !s.auth);
+  $$(".local-only").forEach((el) => el.classList.toggle("hidden", !!s.web));
   const ocr = [];
-  ocr.push(s.has_llama_key ? '<b class="ok">LlamaParse attivo</b>' : '<b class="no">LlamaParse non configurato</b>');
+  ocr.push(s.has_llama_key ? `<b class="ok">LlamaParse attivo${s.web ? " (chiave del server)" : ""}</b>` : '<b class="no">LlamaParse non configurato</b>');
   ocr.push(s.tesseract ? '<b class="ok">Tesseract disponibile</b>' : "Tesseract non installato");
   $("#ocrState").innerHTML = "OCR scansioni: " + ocr.join(" · ");
   $("#btnExample").classList.toggle("hidden", !s.has_example);
@@ -92,7 +106,7 @@ async function poll() {
   $("#runLog").innerHTML = j.log.map((l) => `<li class="${l.startsWith("ERRORE") ? "err" : ""}">${esc(l)}</li>`).join("");
   if (j.status === "running") return setTimeout(poll, 700);
   if (j.status === "error") return runError(j.error || "errore");
-  S.res = j.result; S.res.part_name = j.part_name; S.res.has_drawing = j.has_drawing;
+  S.res = j.result; S.res.part_name = j.part_name; S.res.has_drawing = j.has_drawing; S.res.drawing_name = j.drawing_name || "";
   S.plan = JSON.parse(JSON.stringify(j.result.plan));
   S.sel = null;
   await regenerate(true);
@@ -304,7 +318,7 @@ function renderDrawing() {
   const box = $("#drawingBox");
   if (!r.has_drawing) { box.innerHTML = '<p class="hint">Nessun disegno caricato.</p>'; return; }
   const url = `/api/jobs/${S.job}/drawing`;
-  const isPdf = S.files.drw ? /\.pdf$/i.test(S.files.drw.name) : true;
+  const isPdf = /\.pdf$/i.test(r.drawing_name || "");
   box.innerHTML = isPdf ? `<iframe src="${url}"></iframe>` : `<img src="${url}" alt="disegno">`;
 }
 
@@ -313,7 +327,7 @@ async function regenerate(first) {
   try {
     S.prog = await api(`/api/jobs/${S.job}/generate`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan: S.plan, settings: { part_name: $("#partName").value || S.res.part_name } }),
+      body: JSON.stringify({ plan: S.plan, settings: { ...userSettings(), part_name: $("#partName").value || S.res.part_name } }),
     });
     if (!first) { renderStats(); renderNotes(); renderCode(); renderView(); }
   } catch (e) { toast(e.message, 5000); }
@@ -328,6 +342,10 @@ function openSettings() {
     else if (el.name === "llama_api_key") el.value = "";
     else if (s[el.name] !== undefined) el.value = s[el.name];
   }
+  $("#srvKey").classList.toggle("hidden", !s.web);
+  $("#srvKey").innerHTML = s.has_llama_key
+    ? "La chiave LlamaParse è configurata sul server (segreto): non serve inserirla."
+    : "Chiave LlamaParse non configurata sul server: le scansioni vengono lette con Tesseract.";
   $("#keyHint").innerHTML = s.has_llama_key
     ? `Chiave salvata: <b>${esc(s.llama_key_hint || "impostata")}</b>. Lascia vuoto per mantenerla.`
     : "Gratuita (crediti mensili) su <b>cloud.llamaindex.ai</b> → API Keys.";
@@ -340,8 +358,15 @@ async function saveSettings(e) {
     if (!el.name) continue;
     body[el.name] = el.type === "checkbox" ? el.checked : el.type === "number" ? +el.value : el.value;
   }
-  try { await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
-  catch (err) { return toast(err.message); }
+  if (S.settings && S.settings.web) {
+    const keep = {};
+    for (const k of USER_KEYS) if (body[k] !== undefined) keep[k] = body[k];
+    try { localStorage.setItem(LS_KEY, JSON.stringify(keep)); } catch (err) { /* navigazione privata */ }
+    Object.assign(S.settings, keep);
+  } else {
+    try { await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
+    catch (err) { return toast(err.message); }
+  }
   $("#dlgSettings").close(); await loadSettings(); toast("Impostazioni salvate");
   if (S.job && S.res) regenerate(false);
 }
@@ -350,14 +375,22 @@ async function saveSettings(e) {
 function init() {
   wireDrop("#dropCad", "#fileCad", "cad");
   wireDrop("#dropDrw", "#fileDrw", "drw");
-  $("#btnRun").addEventListener("click", () => startRun(() => {
+  $("#btnRun").addEventListener("click", () => {
+    const mb = ((S.files.cad?.size || 0) + (S.files.drw?.size || 0)) / 1048576;
+    const lim = (S.settings && S.settings.max_upload_mb) || 80;
+    if (mb > lim) return toast(`File troppo grandi (${mb.toFixed(0)} MB, massimo ${lim} MB)`, 5000);
+    runUpload();
+  });
+  const runUpload = () => startRun(() => {
     const fd = new FormData();
     fd.append("cad", S.files.cad);
     if (S.files.drw) fd.append("drawing", S.files.drw);
     fd.append("part_name", $("#partName").value);
+    fd.append("settings", JSON.stringify(userSettings()));
     return api("/api/analyze", { method: "POST", body: fd });
-  }));
-  $("#btnExample").addEventListener("click", () => { S.files.drw = null; $("#partName").value = "STAFFA-001"; startRun(() => api("/api/example", { method: "POST" })); });
+  });
+  $("#btnExample").addEventListener("click", () => { S.files.drw = null; $("#partName").value = "STAFFA-001"; startRun(() => api("/api/example", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: userSettings() }) })); });
+  $("#btnLogout").addEventListener("click", async () => { try { await api("/api/logout", { method: "POST" }); } catch (e) { /* */ } location.href = "/login"; });
   $("#btnBack").addEventListener("click", () => show("upload"));
   $("#btnNew").addEventListener("click", () => show("upload"));
   $("#btnSettings").addEventListener("click", openSettings);

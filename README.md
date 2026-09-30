@@ -10,6 +10,11 @@ quando si usa l'OCR cloud LlamaParse.
 
 ## Webapp online (Render.com)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Dam98/Salva)
+
+Il pulsante crea il servizio già configurato: restano da inserire password e chiave LlamaParse (punto 3).
+In alternativa, la procedura manuale:
+
 Il repository contiene `Dockerfile` e `render.yaml`: Render costruisce l'immagine (con Tesseract già
 installato) e la pubblica su un indirizzo tipo `https://alinea-xxxx.onrender.com`, protetta da password.
 
@@ -146,3 +151,9 @@ tests/              test automatici (pytest)
 
 Sviluppo: `pip install -r requirements.txt pytest`, poi `python -m pytest`. Per rigenerare i file di
 esempio: `pip install cadquery reportlab` e `python esempi/genera_esempi.py`.
+
+## Licenza
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md): libero per uso personale, studio, ricerca e per enti
+non commerciali. **L'uso commerciale** (per esempio in un'azienda, in produzione o come servizio a
+pagamento) **richiede un accordo con l'autore**: apri una issue sul repository.

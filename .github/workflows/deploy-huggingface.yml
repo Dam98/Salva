@@ -1,4 +1,4 @@
-# Pubblica Alinea su Hugging Face Spaces a ogni push sul branch predefinito.
+# Pubblica la versione nel browser di Alinea (sito statico) su Hugging Face Spaces a ogni push.
 # Configurazione (una volta sola), in GitHub > Settings > Secrets and variables > Actions:
 #   Secret   HF_TOKEN  = token Hugging Face con permesso "Write" (huggingface.co/settings/tokens)
 #   Variable HF_SPACE  = (facoltativa) nome dello Space, es. "tuonome/alinea"; se manca si usa
@@ -53,6 +53,12 @@ jobs:
           pip install -r requirements.txt pytest
           python -m pytest -q
 
+      - name: Costruisci il sito statico
+        if: steps.cfg.outputs.skip != '1'
+        run: |
+          python tools/build_static.py /tmp/space
+          cp deploy/huggingface/README.md /tmp/space/README.md
+
       - name: Carica sullo Space
         if: steps.cfg.outputs.skip != '1'
         env:
@@ -60,11 +66,6 @@ jobs:
           HF_SPACE: ${{ vars.HF_SPACE || secrets.HF_SPACE }}
         run: |
           pip install "huggingface_hub>=0.25"
-          mkdir -p /tmp/space
-          cp -r Dockerfile requirements.txt LICENSE.md alinea /tmp/space/
-          mkdir -p /tmp/space/esempi
-          cp esempi/staffa.stp esempi/staffa_disegno.pdf esempi/staffa_scansione.pdf /tmp/space/esempi/
-          cp deploy/huggingface/README.md /tmp/space/README.md
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
@@ -72,12 +73,14 @@ jobs:
           api = HfApi(token=os.environ["HF_TOKEN"])
           # senza HF_SPACE si usa <utente del token>/alinea
           space = os.environ.get("HF_SPACE") or f"{api.whoami()['name']}/alinea"
-          api.create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
+          # Space "static": gratuito per tutti (gli Space Docker richiedono l'abbonamento PRO)
+          api.create_repo(space, repo_type="space", space_sdk="static", exist_ok=True)
           # upload_folder gestisce da solo i file binari (LFS/Xet), che un git push semplice vedrebbe rifiutati
           api.upload_folder(repo_id=space, repo_type="space", folder_path="/tmp/space",
                             commit_message=f"Deploy {os.environ['GITHUB_SHA'][:7]}",
-                            delete_patterns=["alinea/**", "esempi/**"], ignore_patterns=["**/__pycache__/**"])
+                            delete_patterns=["static/**", "py/**", "esempi/**", "alinea/**", "Dockerfile",
+                                             "requirements.txt"])
           print(f"Pubblicato: https://huggingface.co/spaces/{space}")
           sub = space.replace("/", "-").replace("_", "-").replace(".", "-").lower()
-          print(f"Indirizzo dell'app: https://{sub}.hf.space")
+          print(f"Indirizzo dell'app: https://{sub}.static.hf.space")
           PY

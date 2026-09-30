@@ -19,6 +19,17 @@ Log = Callable[[str], None]
 CAD_EXT = {".stp", ".step", ".stpz"}
 
 
+def read_cad(cad_path: str, log: Log = print):
+    log("Lettura del modello STEP…")
+    model = read_step(cad_path)
+    log(f"CAD: {len(model.faces)} facce ({model.surface_counts.get('PLANE', 0)} piani, "
+        f"{model.surface_counts.get('CYLINDRICAL_SURFACE', 0)} cilindri), unità {model.unit}")
+    fs = extract_features(model)
+    log(f"Feature riconosciute: {sum(c.internal for c in fs.cylinders)} fori, "
+        f"{sum(not c.internal for c in fs.cylinders)} perni, {len(fs.planes)} piani")
+    return model, fs
+
+
 def analyze(cad_path: str, drawing_path: str | None, config: dict, log: Log = print) -> dict:
     ext = os.path.splitext(cad_path)[1].lower()
     if ext == ".cad":
@@ -37,23 +48,25 @@ def analyze(cad_path: str, drawing_path: str | None, config: dict, log: Log = pr
         tmp.close()
         cad_path = tmp.name
 
-    log("Lettura del modello STEP…")
-    model = read_step(cad_path)
-    log(f"CAD: {len(model.faces)} facce ({model.surface_counts.get('PLANE', 0)} piani, "
-        f"{model.surface_counts.get('CYLINDRICAL_SURFACE', 0)} cilindri), unità {model.unit}")
-    fs = extract_features(model)
-    log(f"Feature riconosciute: {sum(c.internal for c in fs.cylinders)} fori, "
-        f"{sum(not c.internal for c in fs.cylinders)} perni, {len(fs.planes)} piani")
+    model, fs = read_cad(cad_path, log)
 
-    drawing = DrawingText([], "nessuno", ["Nessun disegno caricato: si usa solo il CAD."])
-    chars: list[Characteristic] = []
-    info: dict = {"general_class": None, "datums": []}
+    drawing = None
     if drawing_path:
         log("Lettura del disegno…")
         drawing = read_drawing(drawing_path, mode=config.get("reader_mode", "auto"),
                                llama_key=config.get("llama_api_key") or os.environ.get("LLAMA_CLOUD_API_KEY"),
                                llama_region=config.get("llama_region", "eu"),
                                llama_mode=config.get("llama_parse_mode", "parse_page_with_llm"), log=log)
+    return analyze_parts(model, fs, drawing, config, log)
+
+
+def analyze_parts(model, fs: FeatureSet, drawing: DrawingText | None, config: dict, log: Log = print) -> dict:
+    """Seconda metà dell'analisi, con il testo del disegno già letto (dal server o dal browser)."""
+    chars: list[Characteristic] = []
+    info: dict = {"general_class": None, "datums": []}
+    if drawing is None:
+        drawing = DrawingText([], "nessuno", ["Nessun disegno caricato: si usa solo il CAD."])
+    else:
         chars, info = parse_drawing_text(drawing.pages, config.get("general_class") or None,
                                          ocr=drawing.method in ("tesseract", "llamaparse"),
                                          layout=drawing.layout)

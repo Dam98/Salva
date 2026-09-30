@@ -118,16 +118,36 @@ _FCF_SYMBOL_OCR = [
 ]
 
 
+_OCR_SYM = {"+": "⌖", "#": "⌖", "⊕": "⌖", "L": "⟂", ".L": "⟂", "⊥": "⟂", "//": "∥"}
+# riga che finisce come un riquadro di tolleranza: valore, eventuale (M), poi riferimenti separati
+_FCF_TAIL = re.compile(r"\d(?:\.\d+)?\s*(?:\(M\)|\(L\))?\s*[|Il1\]\[]\s*[A-H](?:\s*[|Il1\]\[]\s*[A-H]){0,2}"
+                       r"\s*[|Il1\]\[]?\s*$")
+
+
 def normalize_ocr(text: str) -> str:
-    """Correzioni per le confusioni tipiche dell'OCR sui disegni (Tesseract, scansioni sporche)."""
+    """Correzioni per le confusioni tipiche dell'OCR sui disegni (Tesseract nativo e Tesseract.js).
+
+    Il testo deve essere già passato da `normalize`, salvo il simbolo "$" che l'OCR usa spesso al posto
+    di Ø e che `normalize` eliminerebbe: per questo va applicato `ocr_pre` prima di `normalize`.
+    """
     out = []
     for line in text.split("\n"):
         l = line
-        # parentesi/graffe/backslash come separatori dei riquadri di tolleranza
-        if len(re.findall(r"[|\[\]{}]", l)) >= 2:
+        fcf = len(re.findall(r"[|\[\]{}]", l)) >= 2 or _FCF_TAIL.search(l)
+        if fcf:
+            # parentesi/graffe/backslash come separatori dei riquadri di tolleranza
             l = re.sub(r"[\[\]{}\\]", "|", l)
-            for _ in range(3):
-                l = re.sub(r"\|([A-H])[Il1]([A-H])(?=\||$|\s)", r"|\1|\2", l)
+            # separatori letti come I, l o 1 attorno alle lettere dei riferimenti: "0.2(M)IAIBICI"
+            for _ in range(4):
+                l = re.sub(r"(?<=[\d)|])\s*[Il1]\s*(?=[A-H](?![a-z]))", "|", l)
+                l = re.sub(r"(?<=\|[A-H])\s*[Il1](?=\s*[A-H]|\s*$)", "|", l)
+            # simbolo in apertura: "O I+1Q0.2" / "|#1@0.05" / "|L10.03"
+            l = re.sub(r"^\s*[O0o]?\s*[I|]\s*(\.?L|[+#⊕⊥]|//)\s*[1I|](?=\s*[Ø@Qo$O]?\d)",
+                       lambda m: f"|{_OCR_SYM.get(m.group(1), m.group(1))}|", l)
+            l = re.sub(r"\|\s*(\.?L|[+#⊕⊥]|//)\s*1(?=\s*[Ø@Qo$O]?\d)",
+                       lambda m: f"|{_OCR_SYM.get(m.group(1), m.group(1))}|", l)
+            # simbolo perso e "|" letto come 1: "|10.02|" -> "| |0.02|"
+            l = re.sub(r"\|\s*1(0\.\d+)\s*\|", r"| |\1|", l)
             for pat, sym in _FCF_SYMBOL_OCR:
                 l = re.sub(rf"\|\s*(?:{pat})\s*\|", f"|{sym}|", l)
             l = re.sub(r"^\s*[O0o]\s+(?=\|)", "", l)  # cerchietto del richiamo letto come "O"
@@ -137,6 +157,49 @@ def normalize_ocr(text: str) -> str:
         l = re.sub(r"(?<=\d)\s+\+\s*(\d+(?:[.,]\d+)?)(?![\d.,])(?!\s*(?:/|[-+]?\s*\d))", r" ±\1", l)
         out.append(l)
     return "\n".join(out)
+
+
+def merge_layout_lines(pages: list[str], layout: list[list[tuple]]) -> tuple[list[str], list[list[tuple]]]:
+    """Unisce i frammenti OCR che stanno sulla stessa riga visiva, vicini in orizzontale
+    (es. "4x" e "Ø10 ±0.1" riconosciuti separati)."""
+    out_pages, out_layout = [], []
+    for pno, page in enumerate(pages):
+        lines = page.split("\n")
+        boxes = layout[pno] if pno < len(layout) else []
+        if len(boxes) != len(lines):
+            out_pages.append(page)
+            out_layout.append(boxes)
+            continue
+        rows = [[t, list(b)] for t, b in zip(lines, boxes)]
+        merged = True
+        while merged:
+            merged = False
+            rows.sort(key=lambda r: (r[1][1], r[1][0]))
+            for i in range(len(rows)):
+                for j in range(len(rows)):
+                    if i == j:
+                        continue
+                    a, b = rows[i][1], rows[j][1]
+                    h = min(a[3] - a[1], b[3] - b[1])
+                    overlap = min(a[3], b[3]) - max(a[1], b[1])
+                    gap = b[0] - a[2]
+                    if h > 0 and overlap >= 0.5 * h and -0.3 * h <= gap <= 2.0 * h:
+                        rows[i][0] = f"{rows[i][0]} {rows[j][0]}"
+                        rows[i][1] = [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+                        rows.pop(j)
+                        merged = True
+                        break
+                if merged:
+                    break
+        rows.sort(key=lambda r: (r[1][1], r[1][0]))
+        out_pages.append("\n".join(r[0] for r in rows))
+        out_layout.append([tuple(r[1]) for r in rows])
+    return out_pages, out_layout
+
+
+def ocr_pre(text: str) -> str:
+    """Passo da fare prima di `normalize` sul testo OCR: "$10" è quasi sempre "Ø10"."""
+    return re.sub(r"(?<![A-Za-z0-9.\\])\$(?=\d)", "Ø", text)
 
 
 # --------------------------------------------------------------------------- pattern
@@ -210,8 +273,10 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
 
     `ocr=True` applica anche le correzioni per le confusioni tipiche dell'OCR.
     """
+    if ocr and layout:
+        pages, layout = merge_layout_lines(pages, layout)
     if ocr:
-        pages = [normalize_ocr(normalize(p)) for p in pages]
+        pages = [normalize_ocr(normalize(ocr_pre(p))) for p in pages]
     full = "\n".join(pages)
     gclass = general_class or detect_general_class(normalize(full))
     chars: list[Characteristic] = []

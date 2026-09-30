@@ -220,6 +220,7 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
 
     # 3) quote lineari -> distanze piano/piano o asse/piano
     datum_ids = set(datums.values())
+    char_feats_all = {f for fl in char_feats.values() for f in fl}
     for ch in [c for c in chars if c.kind in ("linear", "radius")]:
         if ch.kind == "radius":
             items.append(PlanItem(id=new_id(), label=ch.label, check="manual", nominal=ch.nominal, upper=ch.upper,
@@ -243,6 +244,18 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
         cands_d = [d for d in fs.distances
                    if nom + lo - slack <= d.value <= nom + up + slack or abs(d.value - nom) < 0.005]
         if not cands_d:
+            # nessuna distanza: forse è un diametro con il simbolo Ø perso dall'OCR ("8 +0.1/0 PROF. 30")
+            grp_match = [grp for grp in groups if _diam_score(ch, grp[0].diameter) is not None
+                         and not any(c.id in char_feats_all for c in grp)]
+            if grp_match:
+                feats = [c.id for c in grp_match[0]]
+                char_feats_all.update(feats)
+                items.append(PlanItem(id=new_id(), label="Ø" + ch.label, check="diameter", features=feats,
+                                      nominal=nom, upper=up, lower=lo, char_id=ch.id, status="assunto",
+                                      tolerance_source=ch.tolerance_source,
+                                      notes=["Quota senza simbolo Ø uguale al diametro di un foro del CAD: "
+                                             "interpretata come diametro"]))
+                continue
             items.append(PlanItem(id=new_id(), label=ch.label, check="distance", nominal=nom, upper=up, lower=lo,
                                   char_id=ch.id, status="non associato", enabled=False,
                                   notes=["Nessuna distanza CAD corrispondente: associare a mano"]))

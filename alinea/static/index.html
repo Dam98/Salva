@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Alinea · Generatore PC-DMIS</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%230b6bcb' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%230b6bcb'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="static/style.css">
 </head>
 <body>
 <header class="top">
@@ -128,7 +128,7 @@
       <label class="field local-only">Regione account LlamaParse
         <select name="llama_region"><option value="eu">Europa</option><option value="us">USA</option></select>
       </label>
-      <label class="field">Modalità LlamaParse
+      <label class="field server-only">Modalità LlamaParse
         <select name="llama_parse_mode">
           <option value="parse_page_with_llm">Bilanciata (consigliata)</option>
           <option value="parse_page_without_llm">Veloce, meno crediti (solo OCR)</option>
@@ -137,8 +137,8 @@
       </label>
       <label class="field">Sorgente testo disegno
         <select name="reader_mode">
-          <option value="auto">Automatica (testo PDF → LlamaParse → Tesseract)</option>
-          <option value="llamaparse">Sempre LlamaParse</option>
+          <option value="auto">Automatica (testo PDF, poi OCR)</option>
+          <option value="llamaparse" class="server-only">Sempre LlamaParse</option>
           <option value="tesseract">Sempre Tesseract (locale)</option>
           <option value="pdf">Solo testo del PDF</option>
         </select>
@@ -170,6 +170,8 @@
 </dialog>
 
 <div id="toast" class="toast hidden"></div>
-<script src="/static/app.js"></script>
+<script src="static/mode.js"></script>
+<script src="static/browser.js"></script>
+<script src="static/app.js"></script>
 </body>
 </html>

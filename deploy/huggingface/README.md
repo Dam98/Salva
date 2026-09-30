@@ -3,8 +3,8 @@ title: Alinea
 emoji: 🎯
 colorFrom: blue
 colorTo: gray
-sdk: docker
-app_port: 10000
+sdk: static
+app_file: index.html
 pinned: false
 license: other
 short_description: CAD STEP + disegno tecnico → routine di misura PC-DMIS
@@ -14,5 +14,6 @@ short_description: CAD STEP + disegno tecnico → routine di misura PC-DMIS
 
 Genera la routine di misura PC-DMIS da un modello STEP e dal disegno tecnico (anche scansionato).
 
-L'accesso è protetto da password. Codice, istruzioni e licenza (PolyForm Noncommercial 1.0.0):
+Tutto gira nel browser di chi la usa (Python con Pyodide, OCR con Tesseract.js): i file caricati non
+lasciano il computer. Codice, istruzioni e licenza (PolyForm Noncommercial 1.0.0):
 <https://github.com/Dam98/Salva>

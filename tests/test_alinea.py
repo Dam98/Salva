@@ -174,3 +174,30 @@ def test_scan_with_tesseract():
     assert "Ø25 H7" in labels and "4× Ø10" in labels
     items = {i["label"]: i for i in r["plan"]["items"]}
     assert items["Localizzazione Ø0.05 |A|B|C"]["features"] == ["F1"]
+
+
+def test_tesseract_js_confusions_and_line_merge():
+    # testo reale letto da Tesseract.js sulla scansione di esempio
+    raw = ("120 +0.2\n$10 +0.1\n4x\nO I+1Q0.2(M)IAIBICI\n@25 H7\n8 +0.1/0 PROF. 30\n"
+           "[#1@0.05|A|B|C|\n|L10.03|A|\n|10.02|")
+    boxes = [(900, 100, 1000, 130), (1300, 300, 1450, 330), (1230, 302, 1285, 332), (1230, 340, 1500, 370),
+             (700, 400, 800, 430), (1500, 420, 1800, 450), (700, 440, 900, 470), (700, 480, 820, 510),
+             (1500, 700, 1600, 730)]
+    chars, _ = parse_drawing_text([raw], ocr=True, layout=[boxes])
+    labels = {c.label: c for c in chars}
+    assert "4× Ø10" in labels and "Ø25 H7" in labels
+    pos = [c for c in chars if c.gdt == "position"]
+    assert {labels_by_id(chars, c.parent) for c in pos} == {"4× Ø10", "Ø25 H7"}
+    assert any(c.gdt == "perpendicularity" for c in chars)
+    assert any(c.gdt == "flatness" and c.gdt_value == 0.02 for c in chars)
+
+
+def labels_by_id(chars, cid):
+    return next((c.label for c in chars if c.id == cid), None)
+
+
+def test_diameter_without_symbol_matches_hole(fs):
+    chars, info = parse_drawing_text(["8 +0.1/0 PROF. 30"], ocr=True)
+    plan = build_plan(fs, chars, info["general_class"])
+    it = next(i for i in plan.items if i.char_id == chars[0].id)
+    assert it.check == "diameter" and it.features == ["F6"] and it.status == "assunto"

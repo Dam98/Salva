@@ -32,6 +32,47 @@ async function api(url, opts = {}) {
   if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) { /* */ } throw new Error(m); }
   return r.json();
 }
+// ------------------------------------------------------------------ backend: server o browser
+const BROWSER = window.ALINEA_BROWSER === true && !!window.AlineaBrowser;
+async function pollJob(id, onLog) {
+  let seen = 0;
+  for (;;) {
+    const j = await api(`/api/jobs/${id}`);
+    for (; seen < j.log.length; seen++) onLog(j.log[seen]);
+    if (j.status === "error") throw new Error(j.error || "errore");
+    if (j.status === "done") {
+      return { jobId: id, result: j.result, part_name: j.part_name, has_drawing: j.has_drawing,
+        drawing_name: j.drawing_name || "", drawing_url: `/api/jobs/${id}/drawing` };
+    }
+    await new Promise((r) => setTimeout(r, 700));
+  }
+}
+const BE = BROWSER ? {
+  settings: async () => window.AlineaBrowser.settings(),
+  analyze: (a, onLog) => window.AlineaBrowser.analyze(a, onLog),
+  example: (settings, onLog) => window.AlineaBrowser.example(settings, onLog),
+  generate: (job, plan, settings) => window.AlineaBrowser.generate(job, plan, settings),
+} : {
+  settings: () => api("/api/settings"),
+  async analyze({ cad, drw, partName, settings }, onLog) {
+    const fd = new FormData();
+    fd.append("cad", cad);
+    if (drw) fd.append("drawing", drw);
+    fd.append("part_name", partName);
+    fd.append("settings", JSON.stringify(settings));
+    const { job_id } = await api("/api/analyze", { method: "POST", body: fd });
+    return pollJob(job_id, onLog);
+  },
+  async example(settings, onLog) {
+    const { job_id } = await api("/api/example", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings }) });
+    return pollJob(job_id, onLog);
+  },
+  generate: (job, plan, settings) => api(`/api/jobs/${job}/generate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan, settings }),
+  }),
+};
+
 function download(name, text, type) {
   const blob = new Blob([text], { type });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
@@ -72,15 +113,20 @@ function userSettings() {
   return out;
 }
 async function loadSettings() {
-  S.settings = await api("/api/settings");
+  S.settings = await BE.settings();
   if (S.settings.web) Object.assign(S.settings, localPrefs());
   const s = S.settings;
   $("#btnLogout").classList.toggle("hidden", !s.auth);
   $$(".local-only").forEach((el) => el.classList.toggle("hidden", !!s.web));
   const ocr = [];
-  ocr.push(s.has_llama_key ? `<b class="ok">LlamaParse attivo${s.web ? " (chiave del server)" : ""}</b>` : '<b class="no">LlamaParse non configurato</b>');
-  ocr.push(s.tesseract ? '<b class="ok">Tesseract disponibile</b>' : "Tesseract non installato");
-  $("#ocrState").innerHTML = "OCR scansioni: " + ocr.join(" · ");
+  $$(".server-only").forEach((el) => el.classList.toggle("hidden", !!s.browser));
+  if (s.browser) {
+    $("#ocrState").innerHTML = '<b class="ok">Tutto nel tuo browser</b>: i file non vengono caricati su nessun server · OCR scansioni con Tesseract.js';
+  } else {
+    ocr.push(s.has_llama_key ? `<b class="ok">LlamaParse attivo${s.web ? " (chiave del server)" : ""}</b>` : '<b class="no">LlamaParse non configurato</b>');
+    ocr.push(s.tesseract ? '<b class="ok">Tesseract disponibile</b>' : "Tesseract non installato");
+    $("#ocrState").innerHTML = "OCR scansioni: " + ocr.join(" · ");
+  }
   $("#btnExample").classList.toggle("hidden", !s.has_example);
 }
 
@@ -88,30 +134,28 @@ async function startRun(fn) {
   show("run");
   $("#runLog").innerHTML = ""; $("#runTitle").textContent = "Analisi in corso…";
   $("#spinner").classList.remove("stop"); $("#btnBack").classList.add("hidden");
-  try {
-    const { job_id } = await fn();
-    S.job = job_id;
-    poll();
-  } catch (e) { runError(e.message); }
+  const onLog = (line) => {
+    const li = document.createElement("li");
+    li.textContent = line;
+    if (String(line).startsWith("ERRORE")) li.className = "err";
+    $("#runLog").appendChild(li);
+  };
+  let j;
+  try { j = await fn(onLog); } catch (e) { return runError(e.message); }
+  S.job = j.jobId;
+  S.res = j.result; S.res.part_name = j.part_name; S.res.has_drawing = j.has_drawing;
+  S.res.drawing_name = j.drawing_name || ""; S.res.drawing_url = j.drawing_url;
+  S.plan = JSON.parse(JSON.stringify(j.result.plan));
+  S.sel = null;
+  await regenerate(true);
+  renderReview();
+  show("review");
 }
 function runError(msg) {
   $("#runTitle").textContent = "Analisi non riuscita";
   $("#spinner").classList.add("stop");
   const li = document.createElement("li"); li.className = "err"; li.textContent = msg; $("#runLog").appendChild(li);
   $("#btnBack").classList.remove("hidden");
-}
-async function poll() {
-  let j;
-  try { j = await api(`/api/jobs/${S.job}`); } catch (e) { return runError(e.message); }
-  $("#runLog").innerHTML = j.log.map((l) => `<li class="${l.startsWith("ERRORE") ? "err" : ""}">${esc(l)}</li>`).join("");
-  if (j.status === "running") return setTimeout(poll, 700);
-  if (j.status === "error") return runError(j.error || "errore");
-  S.res = j.result; S.res.part_name = j.part_name; S.res.has_drawing = j.has_drawing; S.res.drawing_name = j.drawing_name || "";
-  S.plan = JSON.parse(JSON.stringify(j.result.plan));
-  S.sel = null;
-  await regenerate(true);
-  renderReview();
-  show("review");
 }
 
 // ------------------------------------------------------------------ step 3: revisione
@@ -317,7 +361,7 @@ function renderDrawing() {
     : "Nessun testo letto dal disegno.\n\n" + r.drawing.notes.join("\n");
   const box = $("#drawingBox");
   if (!r.has_drawing) { box.innerHTML = '<p class="hint">Nessun disegno caricato.</p>'; return; }
-  const url = `/api/jobs/${S.job}/drawing`;
+  const url = r.drawing_url;
   const isPdf = /\.pdf$/i.test(r.drawing_name || "");
   box.innerHTML = isPdf ? `<iframe src="${url}"></iframe>` : `<img src="${url}" alt="disegno">`;
 }
@@ -325,10 +369,7 @@ function renderDrawing() {
 function schedule() { clearTimeout(S.timer); S.timer = setTimeout(() => regenerate(false), 350); }
 async function regenerate(first) {
   try {
-    S.prog = await api(`/api/jobs/${S.job}/generate`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan: S.plan, settings: { ...userSettings(), part_name: $("#partName").value || S.res.part_name } }),
-    });
+    S.prog = await BE.generate(S.job, S.plan, { ...userSettings(), part_name: $("#partName").value || S.res.part_name });
     if (!first) { renderStats(); renderNotes(); renderCode(); renderView(); }
   } catch (e) { toast(e.message, 5000); }
 }
@@ -343,7 +384,9 @@ function openSettings() {
     else if (s[el.name] !== undefined) el.value = s[el.name];
   }
   $("#srvKey").classList.toggle("hidden", !s.web);
-  $("#srvKey").innerHTML = s.has_llama_key
+  $("#srvKey").innerHTML = s.browser
+    ? "Versione nel browser: le scansioni sono lette con Tesseract.js direttamente nel tuo PC (LlamaParse non è disponibile senza server)."
+    : s.has_llama_key
     ? "La chiave LlamaParse è configurata sul server (segreto): non serve inserirla."
     : "Chiave LlamaParse non configurata sul server: le scansioni vengono lette con Tesseract.";
   $("#keyHint").innerHTML = s.has_llama_key
@@ -381,15 +424,12 @@ function init() {
     if (mb > lim) return toast(`File troppo grandi (${mb.toFixed(0)} MB, massimo ${lim} MB)`, 5000);
     runUpload();
   });
-  const runUpload = () => startRun(() => {
-    const fd = new FormData();
-    fd.append("cad", S.files.cad);
-    if (S.files.drw) fd.append("drawing", S.files.drw);
-    fd.append("part_name", $("#partName").value);
-    fd.append("settings", JSON.stringify(userSettings()));
-    return api("/api/analyze", { method: "POST", body: fd });
+  const runUpload = () => startRun((onLog) => BE.analyze({ cad: S.files.cad, drw: S.files.drw,
+    partName: $("#partName").value, settings: userSettings() }, onLog));
+  $("#btnExample").addEventListener("click", () => {
+    $("#partName").value = "STAFFA-001";
+    startRun((onLog) => BE.example(userSettings(), onLog));
   });
-  $("#btnExample").addEventListener("click", () => { S.files.drw = null; $("#partName").value = "STAFFA-001"; startRun(() => api("/api/example", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: userSettings() }) })); });
   $("#btnLogout").addEventListener("click", async () => { try { await api("/api/logout", { method: "POST" }); } catch (e) { /* */ } location.href = "/login"; });
   $("#btnBack").addEventListener("click", () => show("upload"));
   $("#btnNew").addEventListener("click", () => show("upload"));
@@ -415,5 +455,6 @@ function init() {
     catch (e) { toast("Copia non riuscita: usa Scarica .txt"); }
   });
   loadSettings().catch((e) => toast(e.message));
+  if (BROWSER) window.AlineaBrowser.warmup();   // prepara Python mentre l'utente sceglie i file
 }
 init();

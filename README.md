@@ -5,54 +5,51 @@ riconosce fori, piani e pattern con le **coordinate reali** del CAD, interpreta 
 ISO e GD&T dal disegno, li associa automaticamente e scrive il **programma PC-DMIS** (testo dei comandi)
 pronto da incollare, più il **piano di controllo in CSV**.
 
-Gira in locale sul PC (Windows) e si usa dal browser: i file non escono dal PC, tranne il disegno
-quando si usa l'OCR cloud LlamaParse.
+Si usa in tre modi, con la stessa interfaccia:
 
-## Webapp online (Hugging Face Spaces, gratis senza carta)
+| | Dove gira | OCR delle scansioni | Per chi |
+|---|---|---|---|
+| **Webapp nel browser** (Hugging Face) | tutto nel browser di chi la usa | Tesseract.js | chiunque abbia il link, gratis |
+| **Locale** (`avvia.bat`) | sul tuo PC Windows | LlamaParse e/o Tesseract | uso quotidiano, massima precisione OCR |
+| **Server** (Docker/Render) | su un server, con password | LlamaParse e/o Tesseract | team, con la tua chiave LlamaParse |
 
-La webapp gira in uno *Space* Docker di Hugging Face (piano gratuito: 2 vCPU, 16 GB di RAM, nessuna carta
-di credito), protetta da password, all'indirizzo `https://<tuonome>-alinea.hf.space`. Una GitHub Action
-(`.github/workflows/deploy-huggingface.yml`) crea lo Space e lo aggiorna a ogni `git push`.
+## Webapp nel browser (Hugging Face Spaces, gratis)
 
-**Configurazione, una volta sola:**
+La versione web gira **interamente nel browser**: il codice Python di Alinea viene eseguito con
+[Pyodide](https://pyodide.org) e le scansioni sono lette con [Tesseract.js](https://tesseract.projectnaptha.com).
+I file STEP e i disegni **non vengono caricati su nessun server**. È pubblicata come *Space statico* di
+Hugging Face (gratuito, senza carta) all'indirizzo `https://<tuonome>-alinea.static.hf.space`.
 
-1. Crea un account su <https://huggingface.co/join>.
-2. Crea un token: <https://huggingface.co/settings/tokens> → *Create new token* → tipo **Write** → copialo.
-3. Su GitHub, nel repository: **Settings → Secrets and variables → Actions**
-   - tab *Secrets* → *New repository secret*: nome `HF_TOKEN`, valore il token del punto 2;
-   - tab *Variables* → *New repository variable*: nome `HF_SPACE`, valore `<tuonome>/alinea`
-     (`<tuonome>` è il tuo username Hugging Face).
-4. **Actions → Deploy su Hugging Face → Run workflow**. Dopo 1-2 minuti lo Space esiste e inizia la
-   build (la prima dura qualche minuto).
-5. Sullo Space: **Settings → Variables and secrets → New secret**
-   - `ALINEA_PASSWORD`: la password per entrare (finché manca, la webapp resta chiusa);
-   - `LLAMA_CLOUD_API_KEY`: la tua chiave LlamaParse (facoltativa: senza, le scansioni vanno con Tesseract);
-   - `ALINEA_SECRET`: una stringa casuale lunga (tiene valide le sessioni dopo un riavvio);
-   - variabile (non segreto) `LLAMA_REGION`: `eu` oppure `us`, secondo il tuo account LlamaParse.
+Differenze rispetto alla versione locale/server:
+- niente LlamaParse (non accetta chiamate dirette da una pagina web): l'OCR delle scansioni è Tesseract.js;
+- la prima apertura scarica circa 30 MB (Python, OCR, lingue); poi il browser li tiene in cache;
+- niente password: non serve, perché non c'è un server che riceve i file.
 
-   Lo Space si riavvia da solo quando salvi i segreti.
-6. Apri `https://<tuonome>-alinea.hf.space` (l'indirizzo diretto, più comodo della pagina dello Space).
+**Pubblicazione** (una volta sola): la GitHub Action `.github/workflows/deploy-huggingface.yml` esegue i
+test, costruisce il sito (`tools/build_static.py`) e lo carica sullo Space a ogni push.
 
-Da sapere:
-- lo Space creato è **pubblico**: il codice è visibile nella scheda *Files*, ma l'app richiede la password.
-  Se lo rendi privato (*Settings → Change visibility*), per aprirlo servirà anche un account Hugging Face
-  con accesso allo Space;
-- sul piano gratuito lo Space **si sospende dopo 48 ore senza visite**: alla prima apertura si riattiva
-  in circa un minuto;
-- i file caricati restano sul server solo per l'analisi (cancellati dopo 2 ore o al riavvio);
-- ogni push sul branch predefinito ripubblica (dopo che i test sono passati).
+1. Crea un account su <https://huggingface.co/join> e un token **Write** su
+   <https://huggingface.co/settings/tokens>.
+2. Su GitHub: **Settings → Secrets and variables → Actions → New repository secret**:
+   `HF_TOKEN` = il token. (Facoltativo: variabile `HF_SPACE` = `<tuonome>/alinea`; se manca si usa
+   proprio questo nome.)
+3. **Actions → Deploy su Hugging Face → Run workflow**. Alla fine il log mostra l'indirizzo dell'app.
 
-### Alternative
+Per provarla in locale: `python tools/build_static.py` e poi `python -m http.server -d dist 8000`.
 
-La stessa immagine Docker gira ovunque:
+## Server con password (Docker, Render)
+
+L'immagine Docker (`Dockerfile`, con Tesseract) gira su qualsiasi server; in modalità web chiede una
+password e usa la chiave LlamaParse come segreto del server:
 
 ```
 docker build -t alinea .
-docker run -p 10000:10000 -e ALINEA_PASSWORD=... -e LLAMA_CLOUD_API_KEY=... alinea
+docker run -p 10000:10000 -e ALINEA_PASSWORD=... -e LLAMA_CLOUD_API_KEY=... -e ALINEA_SECRET=... alinea
 ```
 
-Su **Render.com** c'è anche il blueprint `render.yaml` (*New → Blueprint*), ma Render può chiedere una
-carta di credito anche per il piano gratuito.
+Senza `ALINEA_PASSWORD` l'app resta chiusa. Su **Render.com** c'è il blueprint `render.yaml`
+(*New → Blueprint*), ma Render può chiedere una carta di credito anche per il piano gratuito; gli Space
+Docker di Hugging Face richiedono l'abbonamento PRO.
 
 ## Installazione locale (Windows)
 
@@ -153,7 +150,10 @@ alinea/
   matching.py       associazione disegno ↔ CAD, scelta dei riferimenti A/B/C
   pcdmis.py         sistema di riferimento, scelta tip, scrittura del programma
   control_plan.py   piano di controllo CSV
-  server.py         server FastAPI locale + interfaccia in alinea/static/
+  server.py         server FastAPI (locale e modalità web con password)
+  browser.py        punti di ingresso per la versione nel browser (Pyodide)
+  static/           interfaccia; browser.js + pyworker.js = backend nel browser
+tools/build_static.py  costruisce il sito statico (dist/)
 esempi/             staffa di prova: STEP, PDF vettoriale, PDF scansionato
 tests/              test automatici (pytest)
 ```

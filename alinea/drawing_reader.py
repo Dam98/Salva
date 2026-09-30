@@ -13,8 +13,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-import httpx
-
 from .drawing_parser import text_quality
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -69,6 +67,8 @@ def llamaparse(path: str, api_key: str, region: str = "eu", log: Log = print,
                timeout_s: int = 300, language: str = "it", parse_mode: str = "parse_page_with_llm",
                max_pages: int = 4) -> list[str]:
     """Carica il file su LlamaParse e restituisce il testo (markdown) pagina per pagina."""
+    import httpx
+
     base = LLAMA_BASE.get(region, LLAMA_BASE["eu"])
     headers = {"Authorization": f"Bearer {api_key}", "accept": "application/json"}
     with httpx.Client(timeout=60) as cli:
@@ -225,7 +225,7 @@ def read_drawing(path: str, mode: str = "auto", llama_key: str | None = None, ll
             log("Invio a LlamaParse (OCR)…")
             pages = llamaparse(path, llama_key, llama_region, log, parse_mode=llama_mode)
             return DrawingText(pages, "llamaparse", notes, page_count or len(pages))
-        except (ReaderError, httpx.HTTPError) as exc:
+        except Exception as exc:  # noqa: BLE001 - ReaderError o errori di rete di httpx
             errors.append(str(exc))
             notes.append(f"{exc}")
             log(str(exc))

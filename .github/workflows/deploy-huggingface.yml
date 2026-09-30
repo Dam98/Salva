@@ -1,7 +1,8 @@
 # Pubblica Alinea su Hugging Face Spaces a ogni push sul branch predefinito.
 # Configurazione (una volta sola), in GitHub > Settings > Secrets and variables > Actions:
 #   Secret   HF_TOKEN  = token Hugging Face con permesso "Write" (huggingface.co/settings/tokens)
-#   Variable HF_SPACE  = nome dello Space, es. "tuonome/alinea" (viene creato se non esiste)
+#   Variable HF_SPACE  = nome dello Space, es. "tuonome/alinea" (viene creato se non esiste;
+#                        va bene anche come Secret)
 name: Deploy su Hugging Face
 
 on:
@@ -21,11 +22,22 @@ jobs:
         id: cfg
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_SPACE: ${{ vars.HF_SPACE }}
+          HF_SPACE: ${{ vars.HF_SPACE || secrets.HF_SPACE }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE" ]; then
-            echo "::notice::HF_TOKEN o HF_SPACE non impostati: pubblicazione saltata (vedi README)."
+          missing=""
+          [ -z "$HF_TOKEN" ] && missing="$missing HF_TOKEN (scheda Secrets)"
+          [ -z "$HF_SPACE" ] && missing="$missing HF_SPACE (scheda Variables o Secrets, es. tuonome/alinea)"
+          if [ -n "$missing" ]; then
+            msg="Manca in Settings > Secrets and variables > Actions:$missing"
             echo "skip=1" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT" = "workflow_dispatch" ]; then
+              echo "::error::$msg"
+              exit 1
+            fi
+            echo "::notice::$msg - pubblicazione saltata."
+          else
+            echo "Configurazione trovata: pubblico su $HF_SPACE"
           fi
 
       - uses: actions/checkout@v4
@@ -46,7 +58,7 @@ jobs:
         if: steps.cfg.outputs.skip != '1'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_SPACE: ${{ vars.HF_SPACE }}
+          HF_SPACE: ${{ vars.HF_SPACE || secrets.HF_SPACE }}
         run: |
           pip install "huggingface_hub>=0.25"
           mkdir -p /tmp/space

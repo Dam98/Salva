@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=alinea alinea ./alinea
-COPY --chown=alinea esempi/staffa.stp esempi/staffa_disegno.pdf esempi/staffa_scansione.pdf ./esempi/
+COPY --chown=alinea esempi/*.stp esempi/*.pdf ./esempi/
 USER alinea
 
 EXPOSE 10000

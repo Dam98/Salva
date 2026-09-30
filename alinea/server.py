@@ -327,13 +327,25 @@ def post_analyze(cad: UploadFile = File(...), drawing: UploadFile | None = File(
         raise
 
 
+# esempi disponibili: id -> (STEP, disegno, codice pezzo)
+EXAMPLE_SETS = {
+    "supporto-scan": ("supporto.stp", "supporto_scansione.pdf", "SUP-2040"),
+    "supporto": ("supporto.stp", "supporto_disegno.pdf", "SUP-2040"),
+    "staffa": ("staffa.stp", "staffa_disegno.pdf", "STAFFA-001"),
+    "staffa-scan": ("staffa.stp", "staffa_scansione.pdf", "STAFFA-001"),
+}
+
+
 @app.post("/api/example")
 def post_example(body: dict | None = None) -> dict:
-    cad = EXAMPLES / "staffa.stp"
+    key = str((body or {}).get("example") or "staffa")
+    if key not in EXAMPLE_SETS:
+        raise HTTPException(404, "Esempio non trovato")
+    cad_name, drw_name, part = EXAMPLE_SETS[key]
+    cad, dr = EXAMPLES / cad_name, EXAMPLES / drw_name
     if not cad.exists():
         raise HTTPException(404, "Esempio non trovato")
-    dr = EXAMPLES / "staffa_disegno.pdf"
-    return _start(str(cad), str(dr) if dr.exists() else None, "STAFFA-001",
+    return _start(str(cad), str(dr) if dr.exists() else None, part,
                   clean_user_settings((body or {}).get("settings")), None)
 
 

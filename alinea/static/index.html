@@ -49,7 +49,15 @@
   </div>
   <div class="row actions">
     <button id="btnRun" class="primary" disabled>Genera routine</button>
-    <button id="btnExample" class="ghost">Prova con il pezzo di esempio</button>
+    <span id="exampleBox" class="example-box">
+      <select id="exampleSel" title="Pezzo di esempio">
+        <option value="supporto-scan">Esempio: supporto cuscinetto · disegno scansionato</option>
+        <option value="supporto">Esempio: supporto cuscinetto · PDF vettoriale</option>
+        <option value="staffa">Esempio: staffa · PDF vettoriale</option>
+        <option value="staffa-scan">Esempio: staffa · disegno scansionato</option>
+      </select>
+      <button id="btnExample" class="ghost">Prova l'esempio</button>
+    </span>
   </div>
   <p id="cadWarn" class="warn hidden"></p>
 </main>

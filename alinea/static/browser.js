@@ -9,6 +9,13 @@ window.AlineaBrowser = (() => {
   const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/";
   const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
   const MAX_OCR_PAGES = 4;
+  // stessi esempi del server (alinea/server.py EXAMPLE_SETS)
+  const EXAMPLES = {
+    "supporto-scan": ["supporto.stp", "supporto_scansione.pdf", "SUP-2040"],
+    "supporto": ["supporto.stp", "supporto_disegno.pdf", "SUP-2040"],
+    "staffa": ["staffa.stp", "staffa_disegno.pdf", "STAFFA-001"],
+    "staffa-scan": ["staffa.stp", "staffa_scansione.pdf", "STAFFA-001"],
+  };
   const IMAGE_RE = /\.(png|jpe?g|bmp|webp|gif)$/i;
 
   const DEFAULTS = {
@@ -187,10 +194,10 @@ window.AlineaBrowser = (() => {
       });
     },
     analyze,
-    async example(settings, onLog) {
-      const [cad, drw] = await Promise.all([fetchFile("esempi/staffa.stp", "staffa.stp"),
-        fetchFile("esempi/staffa_disegno.pdf", "staffa_disegno.pdf")]);
-      return analyze({ cad, drw, partName: "STAFFA-001", settings }, onLog);
+    async example(settings, onLog, key = "staffa") {
+      const ex = EXAMPLES[key] || EXAMPLES.staffa;
+      const [cad, drw] = await Promise.all([fetchFile("esempi/" + ex[0], ex[0]), fetchFile("esempi/" + ex[1], ex[1])]);
+      return analyze({ cad, drw, partName: ex[2], settings }, onLog);
     },
     generate(jobId, plan, settings) {
       return call("generate", { jobId, plan, settings });

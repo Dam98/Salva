@@ -58,6 +58,8 @@ class Characteristic:
     page: int = 1
     line: int = 0
     tolerance_source: str = "disegno"   # disegno | ISO 286 | generale | mancante
+    alt_nominal: float | None = None     # lettura alternativa (OCR: prima cifra forse un Ø letto male)
+    hole_hint: bool = False              # sulla riga c'è PROF./FORO/PASSANTE...: quasi certamente un foro
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -141,6 +143,12 @@ def normalize_ocr(text: str) -> str:
             for _ in range(4):
                 l = re.sub(r"(?<=[\d)|])\s*[Il1]\s*(?=[A-H](?![a-z]))", "|", l)
                 l = re.sub(r"(?<=\|[A-H])\s*[Il1](?=\s*[A-H]|\s*$)", "|", l)
+            # simbolo e valore nella stessa cella: "|/@0.3(M)" -> "|/|@0.3(M)"
+            l = re.sub(r"^\|\s*([^|\w\s.Ø@])\s*(?=[Ø@]\d)", r"|\1|", l)
+            # "O.01" -> "0.01" dentro al riquadro
+            l = re.sub(r"(?<=\|)\s*[Oo](?=\.\d)", "0", l)
+            # localizzazione con "|" persi e Ø letto come 4: "+#40.3(M)|A|B|C|"
+            l = re.sub(r"^\s*[|I+]?\s*[#⊕]\s*[|I1]?\s*4(?=0\.\d)", "|⌖|Ø", l)
             # simbolo in apertura: "O I+1Q0.2" / "|#1@0.05" / "|L10.03"
             l = re.sub(r"^\s*[O0o]?\s*[I|]\s*(\.?L|[+#⊕⊥]|//)\s*[1I|](?=\s*[Ø@Qo$O]?\d)",
                        lambda m: f"|{_OCR_SYM.get(m.group(1), m.group(1))}|", l)
@@ -151,6 +159,14 @@ def normalize_ocr(text: str) -> str:
             for pat, sym in _FCF_SYMBOL_OCR:
                 l = re.sub(rf"\|\s*(?:{pat})\s*\|", f"|{sym}|", l)
             l = re.sub(r"^\s*[O0o]\s+(?=\|)", "", l)  # cerchietto del richiamo letto come "O"
+        # ± letto come £ tra due numeri
+        l = re.sub(r"(?<=\d)\s*£\s*(?=\d)", " ±", l)
+        # accoppiamento con il 6 letto "b": "Ø70 gb" -> "Ø70 g6"
+        l = re.sub(r"(?<=\d)(\s+[A-HKMNPa-hkmnp])b\b", r"\g<1>6", l)
+        # "4x 01140.1": Ø letto 0 e ± letto 4, riconoscibile solo con il prefisso "Nx"
+        l = re.sub(r"(\b\d{1,3}\s*[xX]\s*)0(\d{1,3})[4+](0?\.\d+)\b", r"\1Ø\2 ±\3", l)
+        # Ø letto come 0 davanti a un accoppiamento: "040 H7" -> "Ø40 H7"
+        l = re.sub(r"(?<![\w.Ø])0(\d{2,3}(?:\.\d+)?)(?=\s*(?:JS|js|[A-HKMNPa-hkmnp])\d{1,2}\b)", r"Ø\1", l)
         # Ø letto come @ O Q o
         l = re.sub(r"(?<![A-Za-z0-9.])[@OQo](?=\d)", "Ø", l)
         # ± perso: "120 +0.2" senza secondo scostamento -> ±
@@ -217,6 +233,10 @@ RE_RADIUS = re.compile(rf"(?<![A-Za-z])R(?P<nom>{NUM})" + TOL)
 RE_LINEAR = re.compile(rf"(?<![\w.Ø/+-])(?P<nom>{NUM})" + FIT +
                        rf"(?:\s*±\s*(?P<pm>{NUM})"
                        rf"|\s*\(?\s*(?P<up>[+-]\s*{NUM}|0)\s*(?:/|\s)\s*(?P<lo>[+-]\s*{NUM}|0)\s*\)?)")
+# numero con solo l'accoppiamento, senza tolleranza scritta: "70 g6" (spesso un Ø perso dall'OCR)
+RE_FIT_ONLY = re.compile(rf"(?<![\w.Ø/+-])(?P<nom>{NUM})\s*(?P<fit>(?:JS|js|[A-HKMNPa-hkmnp])\d{{1,2}})\b"
+                         rf"(?!\s*[/±+-]\s*\d)")
+RE_HOLE_WORDS = re.compile(r"PROF\b|PROF\.|DEPTH|↧|FOR[OI]\b|THRU|PASSANT", re.I)
 RE_DATUM_TAG = re.compile(r"(?:DATUM|RIF(?:ERIMENTO)?\.?)\s*([A-H])\b")
 
 
@@ -335,6 +355,8 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
                 nom = float(m.group("nom"))
                 if nom <= 0 or nom > 3000:
                     continue
+                if nom < 1 and "|" in line:
+                    continue  # "Ø0.3" dentro un riquadro di tolleranza: è la zona, non un foro
                 up, lo = _tol_from_match(m)
                 ch = Characteristic(id="", kind="diameter", nominal=nom, count=int(m.group("count") or 1),
                                     fit=m.group("fit"), upper=up, lower=lo, source=m.group(0).strip(),
@@ -368,7 +390,30 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
                         continue
                     ch = Characteristic(id="", kind="linear", nominal=nom, upper=up, lower=lo,
                                         fit=m.group("fit"), source=m.group(0).strip(), page=pno, line=lno)
+                    ch.hole_hint = bool(RE_HOLE_WORDS.search(line))
+                    digits = m.group("nom").split(".")[0]
+                    if ocr and ch.hole_hint and len(digits) >= 2 and digits[0] in "03689":
+                        ch.alt_nominal = float(m.group("nom")[1:])   # "310 +0.1 PROF. 20" = Ø10
                     if add(ch, ("l", nom, up, lo, pno, lno, m.start())):
+                        dims_in_line.append((m.start(), ch))
+                    consumed.append(m.span())
+
+                # quote con il solo accoppiamento ("70 g6"): tolleranza dalla ISO 286
+                for m in RE_FIT_ONLY.finditer(line):
+                    if not free(*m.span()):
+                        continue
+                    nom = float(m.group("nom"))
+                    digits = m.group("nom").split(".")[0]
+                    alt_ok = ocr and len(digits) >= 3 and digits[0] in "0689"
+                    if nom <= 0 or (nom > 500 and not alt_ok):
+                        continue
+                    ch = Characteristic(id="", kind="linear", nominal=nom, fit=m.group("fit"),
+                                        source=m.group(0).strip(), page=pno, line=lno)
+                    if alt_ok:
+                        ch.alt_nominal = float(m.group("nom")[1:])
+                    ch.hole_hint = bool(RE_HOLE_WORDS.search(line))
+                    _complete_tolerance(ch, gclass)
+                    if add(ch, ("lf", nom, ch.fit, pno, lno, m.start())):
                         dims_in_line.append((m.start(), ch))
                     consumed.append(m.span())
 
@@ -391,7 +436,7 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
                                     datums=dats, source=m.group(0).strip(), page=pno, line=lno)
                 before = [c for pos, c in dims_in_line if pos < m.start()]
                 parent = before[-1] if before else (prev_line_dim if not dims_in_line and not line_box else None)
-                if parent is not None and key != "flatness" and parent.kind in ("diameter", "thread"):
+                if parent is not None and key != "flatness" and (parent.kind in ("diameter", "thread") or parent.fit):
                     ch.parent = parent.id
                     if ocr and not before:
                         ch.notes.append("Aggancio alla quota dedotto dall'ordine del testo OCR: verificare")
@@ -407,7 +452,12 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
                 zone = bool(m.group("zone"))
                 # Ø + riferimenti: quasi sempre una localizzazione; altrimenti tipo da scegliere
                 sym = (m.group("sym") or "").strip()
-                key = "position" if zone and dats else ("flatness" if not dats and not sym.isalnum() else None)
+                # Ø oppure (M)/(L) con riferimenti: quasi sempre una localizzazione
+                if (zone or m.group("mod")) and dats:
+                    key = "position"
+                    zone = True   # la localizzazione di un foro ha zona cilindrica
+                else:
+                    key = "flatness" if not dats and not sym.isalnum() else None
                 ch = Characteristic(id="", kind="gdt", gdt=key or "unknown", gdt_value=float(m.group("val")),
                                     gdt_diameter_zone=zone, modifier="MMC" if m.group("mod") == "(M)" else None,
                                     datums=dats, source=m.group(0).strip(), page=pno, line=lno)
@@ -415,7 +465,7 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
                                 + (f"assunto {GDT_LABELS[key]}" if key else "scegliere il tipo di controllo"))
                 before = [c for pos, c in dims_in_line if pos < m.start()]
                 parent = before[-1] if before else (prev_line_dim if not dims_in_line and not line_box else None)
-                if parent is not None and key != "flatness" and parent.kind in ("diameter", "thread"):
+                if parent is not None and key != "flatness" and (parent.kind in ("diameter", "thread") or parent.fit):
                     ch.parent = parent.id
                 elif not before and line_box and key != "flatness":
                     pending_links.append((ch, (pno, line_box)))
@@ -437,7 +487,7 @@ def parse_drawing_text(pages: list[str], general_class: str | None = None, ocr: 
         best = None
         for cid, (cp, db) in boxes.items():
             c = by_id.get(cid)
-            if cp != pno or c is None or c.kind not in ("diameter", "thread"):
+            if cp != pno or c is None or not (c.kind in ("diameter", "thread") or c.fit):
                 continue
             dy = fb[1] - db[3]            # distanza verticale sotto la quota
             dx = abs(fb[0] - db[0])

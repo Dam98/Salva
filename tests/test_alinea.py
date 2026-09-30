@@ -201,3 +201,31 @@ def test_diameter_without_symbol_matches_hole(fs):
     plan = build_plan(fs, chars, info["general_class"])
     it = next(i for i in plan.items if i.char_id == chars[0].id)
     assert it.check == "diameter" and it.features == ["F6"] and it.status == "assunto"
+
+
+def test_demo_part_vector_drawing():
+    r = analyze(str(EX / "supporto.stp"), str(EX / "supporto_disegno.pdf"), {}, log=lambda m: None)
+    items = {i["label"]: i for i in r["plan"]["items"]}
+    assert len(r["characteristics"]) == 16
+    assert items["Ø40 H7"]["features"] == ["F2"] and items["Ø52 H7"]["features"] == ["F1"]
+    assert items["Ø70 g6"]["features"] == ["P1"]                     # perno esterno
+    assert sorted(items["Localizzazione Ø0.3 |A|B|C"]["features"]) == ["F3", "F4", "F5", "F6"]
+    assert sorted(items["Localizzazione Ø0.2 |A|B|C"]["features"]) == ["F10", "F11", "F9"]
+    assert r["plan"]["datums"]["A"] == "S2"                          # non la faccia d'appoggio
+    assert all(i["status"] != "non associato" for i in r["plan"]["items"])
+
+
+def test_tesseract_js_demo_confusions(fs):
+    from alinea.cad_features import extract_features
+    from alinea.step_reader import read_step
+
+    sup = extract_features(read_step(str(EX / "supporto.stp")))
+    raw = ("4x @11 +0.1\n{/@0.3(M)|AIBIC|\n@40 H7\n[#1@0.02|A|B|C|\n@70 gb\n52 H7 PROF. 10\n"
+           "20 £0.05\n8 +0.1/0 PROF. 25\n310 +0.1 PROF. 20")
+    chars, info = parse_drawing_text([raw], ocr=True)
+    assert not any(c.kind == "diameter" and c.nominal == 0.3 for c in chars)   # zona, non foro
+    plan = build_plan(sup, chars, info["general_class"])
+    by = {i.label: i for i in plan.items}
+    assert by["Ø70 g6"].features == ["P1"] and by["Ø52 H7"].features == ["F1"]
+    assert by["Ø8"].features == ["F8"] and by["Ø10"].features == ["F7"]      # PROF. = foro, non distanza
+    assert by["20"].upper == pytest.approx(0.05)

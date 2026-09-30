@@ -50,7 +50,7 @@ async function pollJob(id, onLog) {
 const BE = BROWSER ? {
   settings: async () => window.AlineaBrowser.settings(),
   analyze: (a, onLog) => window.AlineaBrowser.analyze(a, onLog),
-  example: (settings, onLog) => window.AlineaBrowser.example(settings, onLog),
+  example: (settings, onLog, key) => window.AlineaBrowser.example(settings, onLog, key),
   generate: (job, plan, settings) => window.AlineaBrowser.generate(job, plan, settings),
 } : {
   settings: () => api("/api/settings"),
@@ -63,9 +63,9 @@ const BE = BROWSER ? {
     const { job_id } = await api("/api/analyze", { method: "POST", body: fd });
     return pollJob(job_id, onLog);
   },
-  async example(settings, onLog) {
+  async example(settings, onLog, key) {
     const { job_id } = await api("/api/example", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings }) });
+      body: JSON.stringify({ settings, example: key }) });
     return pollJob(job_id, onLog);
   },
   generate: (job, plan, settings) => api(`/api/jobs/${job}/generate`, {
@@ -127,7 +127,7 @@ async function loadSettings() {
     ocr.push(s.tesseract ? '<b class="ok">Tesseract disponibile</b>' : "Tesseract non installato");
     $("#ocrState").innerHTML = "OCR scansioni: " + ocr.join(" · ");
   }
-  $("#btnExample").classList.toggle("hidden", !s.has_example);
+  $("#exampleBox").classList.toggle("hidden", !s.has_example);
 }
 
 async function startRun(fn) {
@@ -256,14 +256,19 @@ function renderItems() {
     tr.querySelector(".en").addEventListener("change", (e) => { it.enabled = e.target.checked; tr.classList.toggle("off", !it.enabled); schedule(); });
     tr.querySelector(".chk").addEventListener("change", (e) => { it.check = e.target.value; renderItems(); schedule(); });
     tr.querySelector(".fs").addEventListener("change", (e) => {
+      const had = it.features.length > 0;
       it.features = e.target.value ? e.target.value.split(",") : [];
       if (it.features.length && it.status === "non associato") { it.status = "assunto"; it.enabled = true; }
+      if (it.features.length && !had) it.enabled = true;   // controllo nuovo: si attiva appena ha una feature
       renderItems(); schedule();
     });
     const rf = tr.querySelector(".rf");
     if (rf) rf.addEventListener("change", (e) => { it.ref_feature = e.target.value || null; schedule(); });
     const numIn = (cls, fn) => tr.querySelector(cls).addEventListener("change", (e) => { const v = e.target.value === "" ? null : +e.target.value; fn(v); schedule(); });
-    numIn(".nom", (v) => (it.nominal = v));
+    numIn(".nom", (v) => {
+      it.nominal = v;
+      if (it.label === "Nuovo controllo" && v !== null) { it.label = `${CHECKS[it.check] || ""} ${num(v)}`.trim(); renderItems(); }
+    });
     numIn(".up", (v) => (it.upper = v));
     numIn(".lo", (v) => (it.lower = v === null ? null : -v));
   });
@@ -427,8 +432,9 @@ function init() {
   const runUpload = () => startRun((onLog) => BE.analyze({ cad: S.files.cad, drw: S.files.drw,
     partName: $("#partName").value, settings: userSettings() }, onLog));
   $("#btnExample").addEventListener("click", () => {
-    $("#partName").value = "STAFFA-001";
-    startRun((onLog) => BE.example(userSettings(), onLog));
+    const key = $("#exampleSel").value;
+    $("#partName").value = key.startsWith("supporto") ? "SUP-2040" : "STAFFA-001";
+    startRun((onLog) => BE.example(userSettings(), onLog, key));
   });
   $("#btnLogout").addEventListener("click", async () => { try { await api("/api/logout", { method: "POST" }); } catch (e) { /* */ } location.href = "/login"; });
   $("#btnBack").addEventListener("click", () => show("upload"));

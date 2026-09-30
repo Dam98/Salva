@@ -137,3 +137,4 @@ legend { font-weight: 600; padding: 0 6px; }
 .login .runbox { width: 100%; max-width: 380px; margin: 0 16px; display: flex; flex-direction: column; gap: 12px; }
 .login .field input { min-width: 0; width: 100%; }
 .srv-key { font-size: 13px; color: var(--muted); }
+.example-box { display: inline-flex; gap: 8px; flex-wrap: wrap; }

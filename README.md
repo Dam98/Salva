@@ -15,6 +15,8 @@ Si usa in tre modi, con la stessa interfaccia:
 
 ## Webapp nel browser (Hugging Face Spaces, gratis)
 
+**Online:** <https://sarbu-alinea.static.hf.space> · copione per la demo: [docs/DEMO.md](docs/DEMO.md)
+
 La versione web gira **interamente nel browser**: il codice Python di Alinea viene eseguito con
 [Pyodide](https://pyodide.org) e le scansioni sono lette con [Tesseract.js](https://tesseract.projectnaptha.com).
 I file STEP e i disegni **non vengono caricati su nessun server**. È pubblicata come *Space statico* di

@@ -19,7 +19,8 @@ PKG = ROOT / "alinea"
 PY_MODULES = ["__init__", "geom", "step_reader", "cad_features", "iso_tolerances", "drawing_parser",
               "drawing_reader", "matching", "pcdmis", "control_plan", "pipeline", "browser"]
 WHEELS = ["pypdf"]            # librerie pure-Python installate con micropip
-EXAMPLES = ["staffa.stp", "staffa_disegno.pdf", "staffa_scansione.pdf"]
+EXAMPLES = ["staffa.stp", "staffa_disegno.pdf", "staffa_scansione.pdf",
+            "supporto.stp", "supporto_disegno.pdf", "supporto_scansione.pdf"]
 
 
 def build(out: Path) -> None:

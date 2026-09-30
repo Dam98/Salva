@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from . import geom as g
 from .cad_features import CylFeature, FeatureSet, PlaneFeature
 from .drawing_parser import GDT_LABELS, Characteristic
-from .iso_tolerances import COARSE_PITCH, general_tolerance
+from .iso_tolerances import COARSE_PITCH, fit_limits, general_tolerance
 
 # tipi di controllo che il generatore sa scrivere
 CHECKS = ["diameter", "position", "distance", "flatness", "perpendicularity", "parallelism",
@@ -61,8 +61,10 @@ def choose_datums(fs: FeatureSet) -> tuple[dict[str, str], dict[str, list[str]]]
     cand_a = [p.id for p in planes if p.normal[2] > -0.5]  # la faccia appoggiata sul piano non è tastabile
     if not planes:
         return {}, {"A": [], "B": [], "C": []}
-    maxa = planes[0].area
-    top = [p for p in planes if p.area >= 0.9 * maxa]
+    # la faccia su cui il pezzo appoggia (normale verso il basso) non è tastabile: A tra le altre
+    reachable = [p for p in planes if p.normal[2] > -0.5] or planes
+    maxa = reachable[0].area
+    top = [p for p in reachable if p.area >= 0.9 * maxa]
     a = max(top, key=lambda p: (p.normal[2], p.area))
     datums = {"A": a.id}
 
@@ -108,8 +110,22 @@ def _tol_span(ch: Characteristic) -> tuple[float, float]:
 
 
 def _diam_score(ch: Characteristic, d: float) -> float | None:
-    nom = ch.nominal or 0.0
-    up, lo = _tol_span(ch)
+    return _diam_score_vals(ch.nominal or 0.0, *_tol_span(ch), d)
+
+
+def _variants(ch: Characteristic) -> list[tuple[float, float | None, float | None, bool]]:
+    """(nominale, sup, inf, è_alternativa) da provare: la lettura OCR alternativa ricalcola la ISO 286."""
+    out = [(ch.nominal or 0.0, ch.upper, ch.lower, False)]
+    if ch.alt_nominal and ch.fit:
+        lim = fit_limits(ch.alt_nominal, ch.fit)
+        if lim:
+            out.append((ch.alt_nominal, lim[0], lim[1], True))
+    elif ch.alt_nominal:
+        out.append((ch.alt_nominal, ch.upper, ch.lower, True))
+    return out
+
+
+def _diam_score_vals(nom: float, up: float, lo: float, d: float) -> float | None:
     slack = max(0.02, 0.002 * nom)
     if nom + lo - slack <= d <= nom + up + slack:
         return abs(d - (nom + (up + lo) / 2))
@@ -141,20 +157,30 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
         return f"M{len(items) + 1}"
 
     # 1) diametri e filetti -> gruppi di cilindri
-    dim_chars = [c for c in chars if c.kind in ("diameter", "thread")]
+    # le quote con solo accoppiamento ("70 g6") sono quasi sempre diametri
+    dim_chars = [c for c in chars if c.kind in ("diameter", "thread") or (c.kind == "linear" and c.fit)]
     dim_chars.sort(key=lambda c: (-c.count, -(c.nominal or 0)))
     for ch in dim_chars:
-        scorer = _thread_score if ch.kind == "thread" else _diam_score
         best = None
-        for gi, grp in enumerate(groups):
-            s = scorer(ch, grp[0].diameter)
-            if s is None:
-                continue
-            penalty = 0.0 if len(grp) == ch.count else (0.5 if len(grp) > ch.count else 2.0)
-            penalty += 5.0 if gi in used_groups else 0.0
-            key = s + penalty
-            if best is None or key < best[0]:
-                best = (key, gi)
+        variant = None
+        for var in (_variants(ch) if ch.kind != "thread" else [(ch.nominal or 0.0, None, None, False)]):
+            for gi, grp in enumerate(groups):
+                if ch.kind == "thread":
+                    s = _thread_score(ch, grp[0].diameter)
+                else:
+                    up_v = var[1] if var[1] is not None else 0.0
+                    lo_v = var[2] if var[2] is not None else 0.0
+                    s = _diam_score_vals(var[0], up_v, lo_v, grp[0].diameter)
+                if s is None:
+                    continue
+                penalty = 0.0 if len(grp) == ch.count else (0.5 if len(grp) > ch.count else 2.0)
+                penalty += 5.0 if gi in used_groups else 0.0
+                penalty += 1.0 if var[3] else 0.0
+                key = s + penalty
+                if best is None or key < best[0]:
+                    best, variant = (key, gi), var
+        if best is None and ch.kind == "linear":
+            continue  # quota con accoppiamento che non è un diametro: la tratta il passo delle distanze
         if best is None:
             items.append(PlanItem(id=new_id(), label=ch.label, check="diameter" if ch.kind == "diameter" else "position",
                                   nominal=ch.nominal, upper=ch.upper, lower=ch.lower, char_id=ch.id,
@@ -169,7 +195,17 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
         notes = list(ch.notes)
         if len(grp) != ch.count:
             notes.append(f"Il disegno indica {ch.count}×, nel CAD ce ne sono {len(grp)}: associati tutti")
-        if ch.kind == "thread":
+        if ch.kind == "linear":
+            nom_v, up_v, lo_v, alt = variant
+            label = f"Ø{nom_v:g} {ch.fit}"
+            notes.append("Quota con accoppiamento senza simbolo Ø: interpretata come diametro")
+            if alt:
+                notes = [n for n in notes if not n.startswith("Accoppiamento")]
+                notes.append(f"Letta dall'OCR come {ch.nominal:g}: la prima cifra era il simbolo Ø")
+            items.append(PlanItem(id=new_id(), label=label, check="diameter", features=feats, nominal=nom_v,
+                                  upper=up_v, lower=lo_v, char_id=ch.id, status="assunto",
+                                  tolerance_source=ch.tolerance_source, notes=notes))
+        elif ch.kind == "thread":
             items.append(PlanItem(id=new_id(), label=ch.label + " (posizione)", check="position", features=feats,
                                   nominal=grp[0].diameter, char_id=ch.id, status="associato",
                                   tolerance_source="filetto", datums=[k for k in ("A", "B", "C") if k in datums],
@@ -202,7 +238,8 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
                 notes.append("Planarità senza quota di aggancio: assegnata al riferimento A")
             elif ch.gdt in ("perpendicularity", "parallelism") and fs.cylinders:
                 # tipico: perpendicolarità del foro principale rispetto ad A
-                big = max(fs.cylinders, key=lambda c: c.diameter)
+                big = max((c for c in fs.cylinders if c.internal), key=lambda c: c.diameter,
+                          default=max(fs.cylinders, key=lambda c: c.diameter))
                 feats = [big.id]
                 status = "assunto"
                 notes.append(f"Nessuna quota di aggancio letta: assegnata al foro più grande ({big.id})")
@@ -221,6 +258,26 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
     # 3) quote lineari -> distanze piano/piano o asse/piano
     datum_ids = set(datums.values())
     char_feats_all = {f for fl in char_feats.values() for f in fl}
+
+    def _hole_fallback(ch: Characteristic) -> bool:
+        """Quota lineare uguale al diametro di un foro non ancora quotato: la tratta come diametro."""
+        for nom_v, up_v, lo_v, alt in _variants(ch):
+            up_v = up_v if up_v is not None else 0.0
+            lo_v = lo_v if lo_v is not None else 0.0
+            grp_match = [grp for grp in groups if _diam_score_vals(nom_v, up_v, lo_v, grp[0].diameter) is not None
+                         and not any(c.id in char_feats_all for c in grp)]
+            if not grp_match:
+                continue
+            feats = [c.id for c in grp_match[0]]
+            char_feats_all.update(feats)
+            notes = ["Quota senza simbolo Ø uguale al diametro di un foro del CAD: interpretata come diametro"]
+            if alt:
+                notes.append(f"Letta dall'OCR come {ch.nominal:g}: la prima cifra era il simbolo Ø")
+            items.append(PlanItem(id=new_id(), label=f"Ø{nom_v:g}", check="diameter", features=feats,
+                                  nominal=nom_v, upper=up_v, lower=lo_v, char_id=ch.id, status="assunto",
+                                  tolerance_source=ch.tolerance_source, notes=notes))
+            return True
+        return False
     for ch in [c for c in chars if c.kind in ("linear", "radius")]:
         if ch.kind == "radius":
             items.append(PlanItem(id=new_id(), label=ch.label, check="manual", nominal=ch.nominal, upper=ch.upper,
@@ -228,33 +285,19 @@ def build_plan(fs: FeatureSet, chars: list[Characteristic], general_class: str |
                                   notes=["Raggi: da misurare con scansione/arco, non generati automaticamente"]))
             continue
         # una quota senza Ø ma con accoppiamento può essere un diametro (es. albero "25 g6")
-        if ch.fit:
-            grp_match = [grp for grp in groups if _diam_score(ch, grp[0].diameter) is not None]
-            if grp_match:
-                feats = [c.id for c in grp_match[0]]
-                items.append(PlanItem(id=new_id(), label="Ø" + ch.label, check="diameter", features=feats,
-                                      nominal=ch.nominal, upper=ch.upper, lower=ch.lower, char_id=ch.id,
-                                      status="assunto", tolerance_source=ch.tolerance_source,
-                                      notes=["Quota con accoppiamento senza simbolo Ø: interpretata come diametro"]))
-                continue
+        if ch.fit and ch.id in char_feats:
+            continue  # già associata come diametro al passo 1
         up, lo = _tol_span(ch)
         nom = ch.nominal or 0.0
+        if ch.hole_hint and _hole_fallback(ch):
+            continue  # "Ø8 +0.1/0 PROF. 25" con il Ø perso: è un foro, non una distanza
         slack = max(0.005, 0.25 * (up - lo))
         # il CAD può essere modellato al nominale oppure a metà tolleranza
         cands_d = [d for d in fs.distances
                    if nom + lo - slack <= d.value <= nom + up + slack or abs(d.value - nom) < 0.005]
         if not cands_d:
-            # nessuna distanza: forse è un diametro con il simbolo Ø perso dall'OCR ("8 +0.1/0 PROF. 30")
-            grp_match = [grp for grp in groups if _diam_score(ch, grp[0].diameter) is not None
-                         and not any(c.id in char_feats_all for c in grp)]
-            if grp_match:
-                feats = [c.id for c in grp_match[0]]
-                char_feats_all.update(feats)
-                items.append(PlanItem(id=new_id(), label="Ø" + ch.label, check="diameter", features=feats,
-                                      nominal=nom, upper=up, lower=lo, char_id=ch.id, status="assunto",
-                                      tolerance_source=ch.tolerance_source,
-                                      notes=["Quota senza simbolo Ø uguale al diametro di un foro del CAD: "
-                                             "interpretata come diametro"]))
+            # nessuna distanza: forse è un diametro con il simbolo Ø perso dall'OCR
+            if _hole_fallback(ch):
                 continue
             items.append(PlanItem(id=new_id(), label=ch.label, check="distance", nominal=nom, upper=up, lower=lo,
                                   char_id=ch.id, status="non associato", enabled=False,

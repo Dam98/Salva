@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alinea · Generatore PC-DMIS</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%230b6bcb' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%230b6bcb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">◎</span> Alinea <small>CAD + disegno → routine PC-DMIS</small></div>
+  <nav class="steps">
+    <span data-step="upload" class="on">1 · Carica</span>
+    <span data-step="run">2 · Analisi</span>
+    <span data-step="review">3 · Revisione ed export</span>
+  </nav>
+  <button id="btnSettings" class="ghost" title="Impostazioni">⚙ Impostazioni</button>
+</header>
+
+<!-- STEP 1 -->
+<main id="upload" class="screen">
+  <section class="intro">
+    <h1>Genera la routine di misura</h1>
+    <p>Carica il modello <b>STEP</b> e il <b>disegno</b> (PDF vettoriale, PDF scansionato o immagine).
+      Alinea legge la geometria reale dal CAD, interpreta quote, tolleranze e GD&amp;T dal disegno,
+      li associa e scrive il programma PC-DMIS con coordinate vere nel sistema dei riferimenti.</p>
+  </section>
+  <div class="drops">
+    <label class="drop" id="dropCad">
+      <input type="file" id="fileCad" accept=".stp,.step,.stpz,.cad">
+      <div class="drop-icon">⬡</div>
+      <div class="drop-title">Modello CAD</div>
+      <div class="drop-sub">STEP AP203 / AP214 / AP242 (.stp .step)</div>
+      <div class="drop-file" id="nameCad">Trascina qui o clicca</div>
+    </label>
+    <label class="drop" id="dropDrw">
+      <input type="file" id="fileDrw" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp">
+      <div class="drop-icon">▦</div>
+      <div class="drop-title">Disegno tecnico</div>
+      <div class="drop-sub">PDF vettoriale o scansione, PNG/JPG/TIF</div>
+      <div class="drop-file" id="nameDrw">Trascina qui o clicca (facoltativo)</div>
+    </label>
+  </div>
+  <div class="row">
+    <label class="field">Codice pezzo <input id="partName" placeholder="dal nome del file CAD"></label>
+    <div id="ocrState" class="ocr-state"></div>
+  </div>
+  <div class="row actions">
+    <button id="btnRun" class="primary" disabled>Genera routine</button>
+    <button id="btnExample" class="ghost">Prova con il pezzo di esempio</button>
+  </div>
+  <p id="cadWarn" class="warn hidden"></p>
+</main>
+
+<!-- STEP 2 -->
+<main id="run" class="screen hidden">
+  <div class="runbox">
+    <div class="spinner" id="spinner"></div>
+    <h2 id="runTitle">Analisi in corso…</h2>
+    <ol id="runLog" class="log"></ol>
+    <div class="row actions"><button id="btnBack" class="ghost hidden">← Torna al caricamento</button></div>
+  </div>
+</main>
+
+<!-- STEP 3 -->
+<main id="review" class="screen hidden">
+  <div class="stats" id="stats"></div>
+  <div id="notes" class="notes"></div>
+  <div class="grid">
+    <section class="panel left">
+      <div class="tabs">
+        <button data-tab="view" class="on">Vista CAD</button>
+        <button data-tab="drawing">Disegno</button>
+        <button data-tab="text">Testo letto</button>
+      </div>
+      <div class="tab" id="tab-view"><svg id="partView" viewBox="0 0 100 100"></svg>
+        <p class="hint">Vista dall'alto nel sistema A/B/C. Clicca un foro per vederne controlli e codice.</p></div>
+      <div class="tab hidden" id="tab-drawing"><div id="drawingBox" class="drawing"></div></div>
+      <div class="tab hidden" id="tab-text"><pre id="drawingText" class="drawing-text"></pre></div>
+    </section>
+
+    <section class="panel mid">
+      <h3>Riferimenti</h3>
+      <div class="datums" id="datums"></div>
+      <div class="table-head">
+        <h3>Controlli <small id="itemCount"></small></h3>
+        <div>
+          <button id="btnAdd" class="ghost small">+ Aggiungi controllo</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="items">
+          <thead><tr><th></th><th>N.</th><th>Caratteristica</th><th>Controllo</th><th>Feature CAD</th>
+            <th>Nom.</th><th>+Toll</th><th>−Toll</th><th>Stato</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel right">
+      <div class="code-head">
+        <h3>Programma PC-DMIS</h3>
+        <div class="btns">
+          <button id="btnCopy" class="ghost small">Copia</button>
+          <button id="btnTxt" class="primary small">Scarica .txt</button>
+          <button id="btnCsv" class="ghost small">Piano .csv</button>
+        </div>
+      </div>
+      <pre id="code" class="code"></pre>
+    </section>
+  </div>
+  <div class="row actions"><button id="btnNew" class="ghost">← Nuovo pezzo</button></div>
+</main>
+
+<!-- IMPOSTAZIONI -->
+<dialog id="dlgSettings">
+  <form method="dialog" id="formSettings">
+    <h2>Impostazioni</h2>
+    <fieldset>
+      <legend>Lettura disegni (OCR)</legend>
+      <label class="field">Chiave API LlamaParse
+        <input name="llama_api_key" type="password" placeholder="llx-…  (lascia vuoto per non cambiarla)" autocomplete="off">
+        <small id="keyHint">Gratuita (crediti mensili) su <b>cloud.llamaindex.ai</b> → API Keys.</small>
+      </label>
+      <label class="field">Regione account LlamaParse
+        <select name="llama_region"><option value="eu">Europa</option><option value="us">USA</option></select>
+      </label>
+      <label class="field">Modalità LlamaParse
+        <select name="llama_parse_mode">
+          <option value="parse_page_with_llm">Bilanciata (consigliata)</option>
+          <option value="parse_page_without_llm">Veloce, meno crediti (solo OCR)</option>
+          <option value="parse_page_with_agent">Agente, più precisa (più crediti)</option>
+        </select>
+      </label>
+      <label class="field">Sorgente testo disegno
+        <select name="reader_mode">
+          <option value="auto">Automatica (testo PDF → LlamaParse → Tesseract)</option>
+          <option value="llamaparse">Sempre LlamaParse</option>
+          <option value="tesseract">Sempre Tesseract (locale)</option>
+          <option value="pdf">Solo testo del PDF</option>
+        </select>
+      </label>
+      <label class="field">Tolleranze generali (se non lette dal cartiglio)
+        <select name="general_class"><option value="">Dal disegno, altrimenti ISO 2768-m</option>
+          <option value="f">ISO 2768-f</option><option value="m">ISO 2768-m</option>
+          <option value="c">ISO 2768-c</option><option value="v">ISO 2768-v</option></select>
+      </label>
+    </fieldset>
+    <fieldset>
+      <legend>Macchina e strategia</legend>
+      <div class="two">
+        <label class="field">Tastatore (LOADPROBE) <input name="probe"></label>
+        <label class="field">Ø sfera [mm] <input name="stylus_diameter" type="number" step="0.1"></label>
+        <label class="field">Piano di sicurezza [mm] <input name="clearance" type="number" step="1"></label>
+        <label class="field">Passo testa [°] <input name="tip_step" type="number" step="0.5"></label>
+        <label class="field">Punti per cerchio <input name="circle_hits" type="number" min="3"></label>
+        <label class="field">Punti per piano <input name="plane_hits" type="number" min="3"></label>
+        <label class="field">Cilindro se lunghezza ≥ [mm] <input name="cylinder_min_length" type="number" step="0.5"></label>
+        <label class="field check"><input name="manual_alignment" type="checkbox"> Allineamento manuale iniziale</label>
+      </div>
+    </fieldset>
+    <div class="row actions">
+      <button value="cancel" class="ghost">Annulla</button>
+      <button id="btnSaveSettings" value="save" class="primary">Salva</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

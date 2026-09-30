@@ -8,42 +8,51 @@ pronto da incollare, più il **piano di controllo in CSV**.
 Gira in locale sul PC (Windows) e si usa dal browser: i file non escono dal PC, tranne il disegno
 quando si usa l'OCR cloud LlamaParse.
 
-## Webapp online (Render.com)
+## Webapp online (Hugging Face Spaces, gratis senza carta)
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Dam98/Salva)
+La webapp gira in uno *Space* Docker di Hugging Face (piano gratuito: 2 vCPU, 16 GB di RAM, nessuna carta
+di credito), protetta da password, all'indirizzo `https://<tuonome>-alinea.hf.space`. Una GitHub Action
+(`.github/workflows/deploy-huggingface.yml`) crea lo Space e lo aggiorna a ogni `git push`.
 
-Il pulsante crea il servizio già configurato: restano da inserire password e chiave LlamaParse (punto 3).
-In alternativa, la procedura manuale:
+**Configurazione, una volta sola:**
 
-Il repository contiene `Dockerfile` e `render.yaml`: Render costruisce l'immagine (con Tesseract già
-installato) e la pubblica su un indirizzo tipo `https://alinea-xxxx.onrender.com`, protetta da password.
+1. Crea un account su <https://huggingface.co/join>.
+2. Crea un token: <https://huggingface.co/settings/tokens> → *Create new token* → tipo **Write** → copialo.
+3. Su GitHub, nel repository: **Settings → Secrets and variables → Actions**
+   - tab *Secrets* → *New repository secret*: nome `HF_TOKEN`, valore il token del punto 2;
+   - tab *Variables* → *New repository variable*: nome `HF_SPACE`, valore `<tuonome>/alinea`
+     (`<tuonome>` è il tuo username Hugging Face).
+4. **Actions → Deploy su Hugging Face → Run workflow**. Dopo 1-2 minuti lo Space esiste e inizia la
+   build (la prima dura qualche minuto).
+5. Sullo Space: **Settings → Variables and secrets → New secret**
+   - `ALINEA_PASSWORD`: la password per entrare (finché manca, la webapp resta chiusa);
+   - `LLAMA_CLOUD_API_KEY`: la tua chiave LlamaParse (facoltativa: senza, le scansioni vanno con Tesseract);
+   - `ALINEA_SECRET`: una stringa casuale lunga (tiene valide le sessioni dopo un riavvio);
+   - variabile (non segreto) `LLAMA_REGION`: `eu` oppure `us`, secondo il tuo account LlamaParse.
 
-1. Crea un account su <https://render.com> (va bene "Sign in with GitHub").
-2. Dashboard → **New** → **Blueprint** → collega GitHub e dai accesso al repository **Dam98/Salva**
-   (è privato: nella finestra di GitHub scegli *Only select repositories* → Salva).
-3. Seleziona il repository: Render legge `render.yaml` e chiede i valori dei segreti:
-   - `ALINEA_PASSWORD`: la password da dare a chi deve usare la webapp;
-   - `LLAMA_CLOUD_API_KEY`: la tua chiave LlamaParse (<https://cloud.llamaindex.ai> → API Keys).
-     Se la lasci vuota le scansioni vengono lette con Tesseract.
-   - `LLAMA_REGION` è `eu`: cambialo in `us` se il tuo account LlamaParse è sul server USA.
-4. **Apply**. La prima build richiede qualche minuto; poi apri l'indirizzo del servizio.
+   Lo Space si riavvia da solo quando salvi i segreti.
+6. Apri `https://<tuonome>-alinea.hf.space` (l'indirizzo diretto, più comodo della pagina dello Space).
 
-Da sapere sul piano gratuito:
-- il servizio **si addormenta dopo 15 minuti** senza visite: la prima apertura successiva impiega circa un
-  minuto;
-- 512 MB di RAM: bastano per pezzi normali; per STEP molto grandi (oltre 20-30 MB) serve il piano
-  *Starter*;
-- i file caricati restano sul server solo per la durata dell'analisi (cancellati dopo 2 ore o al riavvio);
-- ogni `git push` sul branch collegato ripubblica automaticamente.
+Da sapere:
+- lo Space creato è **pubblico**: il codice è visibile nella scheda *Files*, ma l'app richiede la password.
+  Se lo rendi privato (*Settings → Change visibility*), per aprirlo servirà anche un account Hugging Face
+  con accesso allo Space;
+- sul piano gratuito lo Space **si sospende dopo 48 ore senza visite**: alla prima apertura si riattiva
+  in circa un minuto;
+- i file caricati restano sul server solo per l'analisi (cancellati dopo 2 ore o al riavvio);
+- ogni push sul branch predefinito ripubblica (dopo che i test sono passati).
 
-Per cambiare password o chiave: servizio *alinea* → **Environment** → modifica → *Save changes*.
+### Alternative
 
-La stessa immagine gira su qualsiasi server con Docker:
+La stessa immagine Docker gira ovunque:
 
 ```
 docker build -t alinea .
 docker run -p 10000:10000 -e ALINEA_PASSWORD=... -e LLAMA_CLOUD_API_KEY=... alinea
 ```
+
+Su **Render.com** c'è anche il blueprint `render.yaml` (*New → Blueprint*), ma Render può chiedere una
+carta di credito anche per il piano gratuito.
 
 ## Installazione locale (Windows)
 

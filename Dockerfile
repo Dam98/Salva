@@ -14,14 +14,14 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng \
  && rm -rf /var/lib/apt/lists/*
 
+# utente con UID 1000 (richiesto da Hugging Face Spaces, buona pratica ovunque)
+RUN useradd --create-home --uid 1000 alinea
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY alinea ./alinea
-COPY esempi/staffa.stp esempi/staffa_disegno.pdf esempi/staffa_scansione.pdf ./esempi/
-
-RUN useradd --create-home --uid 1000 alinea && chown -R alinea /app
+COPY --chown=alinea alinea ./alinea
+COPY --chown=alinea esempi/staffa.stp esempi/staffa_disegno.pdf esempi/staffa_scansione.pdf ./esempi/
 USER alinea
 
 EXPOSE 10000

@@ -42,6 +42,10 @@ MAX_UPLOAD_MB = int(os.environ.get("ALINEA_MAX_UPLOAD_MB", "80"))
 JOB_TTL_S = int(os.environ.get("ALINEA_JOB_TTL_MIN", "120")) * 60
 MAX_RUNNING = int(os.environ.get("ALINEA_MAX_RUNNING", "2"))
 COOKIE = "alinea_sessione"
+# in modalità web senza password l'app resta chiusa, a meno di sceglierlo esplicitamente
+ALLOW_PUBLIC = os.environ.get("ALINEA_ALLOW_PUBLIC", "") == "1"
+# chi può incorporare la pagina in un iframe (Hugging Face mostra lo Space dentro huggingface.co)
+FRAME_ANCESTORS = os.environ.get("ALINEA_FRAME_ANCESTORS", "'self' https://huggingface.co")
 
 DEFAULTS = {
     "llama_api_key": "",
@@ -136,6 +140,8 @@ _FAILS: dict[str, list[float]] = {}
 @app.middleware("http")
 async def guard(request: Request, call_next):
     path = request.url.path
+    if WEB and not AUTH_REQUIRED and not ALLOW_PUBLIC and path != "/healthz":
+        return HTMLResponse(SETUP_PAGE, 503)
     if request.method == "POST" and path == "/api/analyze":
         size = int(request.headers.get("content-length") or 0)
         if size > MAX_UPLOAD_MB * 1024 * 1024:
@@ -147,7 +153,7 @@ async def guard(request: Request, call_next):
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
-    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Content-Security-Policy", f"frame-ancestors {FRAME_ANCESTORS}")
     return resp
 
 
@@ -173,9 +179,7 @@ def login(body: dict, request: Request) -> JSONResponse:
     if not AUTH_REQUIRED or hmac.compare_digest(str(body.get("password", "")).encode(), PASSWORD.encode()):
         _FAILS.pop(ip, None)
         resp = JSONResponse({"ok": True})
-        secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
-        resp.set_cookie(COOKIE, make_token(), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax",
-                        secure=secure)
+        _set_session(resp, request, make_token(), SESSION_DAYS * 86400)
         return resp
     fails.append(now)
     _FAILS[ip] = fails
@@ -183,10 +187,30 @@ def login(body: dict, request: Request) -> JSONResponse:
 
 
 @app.post("/api/logout")
-def logout() -> JSONResponse:
+def logout(request: Request) -> JSONResponse:
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(COOKIE)
+    _set_session(resp, request, "", 0)
     return resp
+
+
+def _set_session(resp: JSONResponse, request: Request, value: str, max_age: int) -> None:
+    """Su HTTPS il cookie è SameSite=None + Partitioned, così funziona anche dentro l'iframe di
+    huggingface.co; in HTTP (uso locale) resta un normale cookie Lax."""
+    https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    attrs = [f"{COOKIE}={value}", "Path=/", f"Max-Age={max_age}", "HttpOnly"]
+    # il valore è "scadenza.firma_hex": nessun carattere da codificare
+    attrs += ["Secure", "SameSite=None", "Partitioned"] if https else ["SameSite=Lax"]
+    resp.headers.append("set-cookie", "; ".join(attrs))
+
+
+SETUP_PAGE = """<!doctype html><html lang="it"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Alinea · configurazione</title>
+<body style="font-family:system-ui,sans-serif;max-width:640px;margin:10vh auto;padding:0 16px;line-height:1.5">
+<h1>Alinea non è ancora configurata</h1>
+<p>Per sicurezza la webapp non si apre senza password. Imposta il segreto <b>ALINEA_PASSWORD</b>
+nelle impostazioni del servizio (Hugging Face: <i>Settings › Variables and secrets › New secret</i>)
+e riavvia. Se vuoi davvero un accesso libero, imposta la variabile <b>ALINEA_ALLOW_PUBLIC=1</b>.</p>
+</body></html>"""
 
 
 @app.get("/healthz")

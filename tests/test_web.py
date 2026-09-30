@@ -85,3 +85,29 @@ def test_upload_and_drawing_types(web):
         job2 = c.post("/api/analyze", files={"cad": ("pezzo.stp", a), "drawing": ("x.html", b"<script>")}).json()["job_id"]
     _wait(c, job2)
     assert c.get(f"/api/jobs/{job2}/drawing").status_code == 404
+
+
+def test_web_without_password_stays_closed(monkeypatch):
+    monkeypatch.setenv("ALINEA_WEB", "1")
+    monkeypatch.delenv("ALINEA_PASSWORD", raising=False)
+    import alinea.server as server
+
+    importlib.reload(server)
+    try:
+        c = TestClient(server.app)
+        assert c.get("/healthz").status_code == 200
+        r = c.get("/")
+        assert r.status_code == 503 and "ALINEA_PASSWORD" in r.text
+        assert c.post("/api/example").status_code == 503
+    finally:
+        monkeypatch.delenv("ALINEA_WEB", raising=False)
+        importlib.reload(server)
+
+
+def test_https_cookie_works_in_iframe(web):
+    c = TestClient(web.app, base_url="https://esempio.hf.space")
+    r = c.post("/api/login", json={"password": "segreta-123"})
+    sc = r.headers["set-cookie"].lower()
+    assert "samesite=none" in sc and "secure" in sc and "partitioned" in sc and "httponly" in sc
+    assert "frame-ancestors" in r.headers["content-security-policy"]
+    assert "x-frame-options" not in r.headers

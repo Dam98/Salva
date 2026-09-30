@@ -1,0 +1,69 @@
+# Pubblica Alinea su Hugging Face Spaces a ogni push sul branch predefinito.
+# Configurazione (una volta sola), in GitHub > Settings > Secrets and variables > Actions:
+#   Secret   HF_TOKEN  = token Hugging Face con permesso "Write" (huggingface.co/settings/tokens)
+#   Variable HF_SPACE  = nome dello Space, es. "tuonome/alinea" (viene creato se non esiste)
+name: Deploy su Hugging Face
+
+on:
+  push:
+    branches: [ccr-02e5aff0-w43nui, main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-huggingface
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Controllo configurazione
+        id: cfg
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE" ]; then
+            echo "::notice::HF_TOKEN o HF_SPACE non impostati: pubblicazione saltata (vedi README)."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.skip != '1'
+
+      - uses: actions/setup-python@v5
+        if: steps.cfg.outputs.skip != '1'
+        with:
+          python-version: "3.12"
+
+      - name: Test
+        if: steps.cfg.outputs.skip != '1'
+        run: |
+          pip install -r requirements.txt pytest
+          python -m pytest -q
+
+      - name: Carica sullo Space
+        if: steps.cfg.outputs.skip != '1'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          pip install "huggingface_hub>=0.25"
+          mkdir -p /tmp/space
+          cp -r Dockerfile requirements.txt LICENSE.md alinea /tmp/space/
+          mkdir -p /tmp/space/esempi
+          cp esempi/staffa.stp esempi/staffa_disegno.pdf esempi/staffa_scansione.pdf /tmp/space/esempi/
+          cp deploy/huggingface/README.md /tmp/space/README.md
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["HF_SPACE"]
+          api.create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
+          # upload_folder gestisce da solo i file binari (LFS/Xet), che un git push semplice vedrebbe rifiutati
+          api.upload_folder(repo_id=space, repo_type="space", folder_path="/tmp/space",
+                            commit_message=f"Deploy {os.environ['GITHUB_SHA'][:7]}",
+                            delete_patterns=["alinea/**", "esempi/**"], ignore_patterns=["**/__pycache__/**"])
+          print(f"Pubblicato: https://huggingface.co/spaces/{space}")
+          PY

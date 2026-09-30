@@ -1,8 +1,8 @@
 # Pubblica Alinea su Hugging Face Spaces a ogni push sul branch predefinito.
 # Configurazione (una volta sola), in GitHub > Settings > Secrets and variables > Actions:
 #   Secret   HF_TOKEN  = token Hugging Face con permesso "Write" (huggingface.co/settings/tokens)
-#   Variable HF_SPACE  = nome dello Space, es. "tuonome/alinea" (viene creato se non esiste;
-#                        va bene anche come Secret)
+#   Variable HF_SPACE  = (facoltativa) nome dello Space, es. "tuonome/alinea"; se manca si usa
+#                        <utente del token>/alinea. Lo Space viene creato se non esiste.
 name: Deploy su Hugging Face
 
 on:
@@ -27,7 +27,6 @@ jobs:
         run: |
           missing=""
           [ -z "$HF_TOKEN" ] && missing="$missing HF_TOKEN (scheda Secrets)"
-          [ -z "$HF_SPACE" ] && missing="$missing HF_SPACE (scheda Variables o Secrets, es. tuonome/alinea)"
           if [ -n "$missing" ]; then
             msg="Manca in Settings > Secrets and variables > Actions:$missing"
             echo "skip=1" >> "$GITHUB_OUTPUT"
@@ -37,7 +36,7 @@ jobs:
             fi
             echo "::notice::$msg - pubblicazione saltata."
           else
-            echo "Configurazione trovata: pubblico su $HF_SPACE"
+            echo "Configurazione trovata: pubblico su ${HF_SPACE:-<utente del token>/alinea}"
           fi
 
       - uses: actions/checkout@v4
@@ -71,11 +70,14 @@ jobs:
           from huggingface_hub import HfApi
 
           api = HfApi(token=os.environ["HF_TOKEN"])
-          space = os.environ["HF_SPACE"]
+          # senza HF_SPACE si usa <utente del token>/alinea
+          space = os.environ.get("HF_SPACE") or f"{api.whoami()['name']}/alinea"
           api.create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
           # upload_folder gestisce da solo i file binari (LFS/Xet), che un git push semplice vedrebbe rifiutati
           api.upload_folder(repo_id=space, repo_type="space", folder_path="/tmp/space",
                             commit_message=f"Deploy {os.environ['GITHUB_SHA'][:7]}",
                             delete_patterns=["alinea/**", "esempi/**"], ignore_patterns=["**/__pycache__/**"])
           print(f"Pubblicato: https://huggingface.co/spaces/{space}")
+          sub = space.replace("/", "-").replace("_", "-").replace(".", "-").lower()
+          print(f"Indirizzo dell'app: https://{sub}.hf.space")
           PY

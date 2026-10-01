@@ -42,6 +42,7 @@ class Program:
     warnings: list[str]
     blocks: dict[str, tuple[int, int]]      # id feature/item -> righe (inizio, fine) 1-based
     frame: dict
+    ops: list = field(default_factory=list)  # comandi strutturati (per lo script che crea il .PRG)
 
 
 # --------------------------------------------------------------------------- sistema di riferimento
@@ -184,6 +185,10 @@ def _ang(x: float) -> str:
 class Writer:
     def __init__(self) -> None:
         self.lines: list[str] = []
+        self.ops: list[dict] = []      # gli stessi comandi in forma strutturata
+
+    def op(self, _op: str, **kw) -> None:
+        self.ops.append({"op": _op, **kw})
 
     def cmd(self, label: str, text: str) -> None:
         self.lines.append(f"{label:<11}={text}" if label else f"{'':<12}{text}")
@@ -261,6 +266,8 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
     W.sub("COMMENT/OPER,NO,FULL SCREEN=NO,AUTO-CONTINUE=NO,")
     W.sub(f"Programma generato da Alinea per {st.part_name}.")
     W.sub("Posizionare il pezzo come nel CAD (riferimento A verso l'alto).")
+    W.op("comment", kind="OPER", lines=[f"Programma generato da Alinea per {st.part_name}.",
+                                         "Posizionare il pezzo come nel CAD (riferimento A verso l'alto)."])
 
     top = max(frame.to_local(p)[2] for p in _bbox_corners(fs))
     clear_z = top + st.clearance
@@ -271,16 +278,29 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
     if not isinstance(A, PlaneFeature):
         A = next((p for p in sorted(fs.planes, key=lambda p: -p.area)), None)
 
+    def safe_to(F) -> None:
+        """Percorso sicuro esplicito verso una feature (solo per lo script .PRG; il testo usa CLEARP)."""
+        if isinstance(F, CylFeature):
+            p, v = frame.to_local(F.entry), frame.vec(F.axis)
+        else:
+            p, v = frame.to_local(F.centroid), frame.vec(F.normal)
+        app = g.add(p, g.mul(v, st.safe_distance))
+        W.op("safe_path", points=[[app[0], app[1], clear_z]] + ([list(app)] if abs(v[2]) < 0.9 else []))
+
     def emit_alignment(suffix: str, manual: bool) -> str:
         nm: dict[str, str] = {}
         hits_plane = 3 if manual else st.plane_hits
         if isinstance(A, PlaneFeature):
             nm["{A}"] = f"PLN_A{suffix}"
+            if not manual:
+                safe_to(A)
             _emit_plane(W, nm["{A}"], A, frame, hits_plane, stats)
             names.setdefault(A.id, nm["{A}"])
         for letter in ("B", "C"):
             F = dat_feats.get(letter)
             tag = "{" + letter + "}"
+            if not manual and isinstance(F, (PlaneFeature, CylFeature)):
+                safe_to(F)
             if isinstance(F, PlaneFeature):
                 if F.id == frame.line_plane:
                     nm[tag] = f"LIN_{letter}{suffix}"
@@ -294,6 +314,7 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
         if "{BC}" in " ".join(frame.commands):
             nm["{BC}"] = f"LIN_BC{suffix}"
             W.cmd(nm["{BC}"], "FEAT/LINE,CARTESIAN,UNBOUNDED,NO")
+            W.op("constr_line", id=nm["{BC}"], feats=[nm["{B}"], nm["{C}"]])
             b, c = dat_feats["B"], dat_feats["C"]
             W.sub(f"THEO/<{fmt_vec(frame.to_local(b.entry))}>,<{fmt_vec(frame.vec(frame.line_dir))}>")
             W.sub(f"ACTL/<{fmt_vec(frame.to_local(b.entry))}>,<{fmt_vec(frame.vec(frame.line_dir))}>")
@@ -303,6 +324,7 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
         label = "A_MAN" if manual else "A_DCC"
         recall = "STARTUP" if manual or not st.manual_alignment else "A_MAN"
         W.cmd(label, f"ALIGNMENT/START,RECALL:{recall},LIST=YES")
+        W.op("align_start", id=label, recall=recall)
         for c in frame.commands:
             line = c
             for tag, n in nm.items():
@@ -310,17 +332,25 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
             if "{" in line:
                 continue
             W.sub(line, 14)
+            W.op("align", **_parse_align(line))
         W.sub("ALIGNMENT/END")
+        W.op("align_end")
         return label
 
     start = W.n + 1
     if st.manual_alignment:
         W.sub("COMMENT/OPER,NO,FULL SCREEN=NO,AUTO-CONTINUE=NO,")
         W.sub("Allineamento manuale: prendere i punti nell'ordine indicato (3 su A, 2 su B, 1 su C).")
+        W.op("comment", kind="OPER", lines=["Allineamento manuale: prendere i punti nell'ordine indicato "
+                                             "(3 su A, 2 su B, 1 su C)."])
+        W.op("mode", mode="MANUAL")
         emit_alignment("_MAN", manual=True)
         W.sub("MODE/DCC")
+    W.op("mode", mode="DCC")
     W.sub(f"CLEARP/{g.axis_label(2, 1)},{fmt(clear_z)},{g.axis_label(2, 1)},0,ON")
+    W.op("clearp", axis=g.axis_label(2, 1), value=clear_z)
     W.sub("MOVE/CLEARPLANE")
+    W.op("move_clearplane")
     emit_alignment("", manual=False)
     blocks["ALIGN"] = (start, W.n)
     for letter, fid in plan.datums.items():
@@ -361,15 +391,24 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
             last = nxt[2]
         if t != current_tip:
             W.sub("MOVE/CLEARPLANE")
+            W.op("move_clearplane")
             W.sub(f"TIP/{t}, SHANKIJK={', '.join(fmt(c, 3).rstrip('0').rstrip('.') or '0' for c in ordered[0][1])}, ANGLE=0")
+            W.op("tip", tip=t, shank=list(ordered[0][1]))
             stats["tip_changes"] += 1
             current_tip = t
         for tip, shank, pos, fid, F in ordered:
             s0 = W.n + 1
             side = abs(frame.vec(F.axis if isinstance(F, CylFeature) else F.normal)[2]) < 0.9
+            # percorso sicuro esplicito per lo script .PRG: salita al piano di sicurezza sopra la feature
+            # (e, per le feature laterali, discesa al punto di avvicinamento sul vettore)
+            vec_l = frame.vec(F.axis if isinstance(F, CylFeature) else F.normal)
+            app_pt = g.add(pos, g.mul(vec_l, st.safe_distance))
+            safe_path = [[app_pt[0], app_pt[1], clear_z]] + ([list(app_pt)] if side else [])
+            W.op("safe_path", points=safe_path)
             if side:
                 app = g.add(pos, g.mul(frame.vec(F.axis if isinstance(F, CylFeature) else F.normal), st.safe_distance))
                 W.sub(f"MOVE/POINT,NORMAL,<{fmt_vec(app)}>")
+                W.op("move_point", p=list(app))
             if isinstance(F, CylFeature):
                 if F.diameter <= st.stylus_diameter + 0.5 and F.internal:
                     warnings.append(f"{fid}: Ø{F.diameter:.2f} troppo piccolo per il tastatore Ø{st.stylus_diameter}")
@@ -378,11 +417,14 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
                 _emit_plane(W, names[fid], F, frame, st.plane_hits, stats)
             if side:
                 W.sub(f"MOVE/POINT,NORMAL,<{fmt_vec(app)}>")
+                W.op("move_point", p=list(app))
             blocks[fid] = (s0, W.n)
     stats["tips"] = ["T1A0B0"] + [t for t in tips_order if t != "T1A0B0"]
     W.sub("MOVE/CLEARPLANE")
+    W.op("move_clearplane")
     if current_tip != "T1A0B0":
         W.sub("TIP/T1A0B0, SHANKIJK=0, 0, 1, ANGLE=0")
+        W.op("tip", tip="T1A0B0", shank=[0.0, 0.0, 1.0])
         stats["tip_changes"] += 1
 
     # ---------------------------------------------------------------- dimensioni
@@ -407,7 +449,17 @@ def generate(fs: FeatureSet, plan: Plan, st: Settings) -> Program:
     text = "\n".join(W.lines) + "\n"
     frame_info = {"origin_cad": frame.origin, "x": frame.ex, "y": frame.ey, "z": frame.ez,
                   "commands": frame.commands, "names": names}
-    return Program(text=text, stats=stats, warnings=warnings, blocks=blocks, frame=frame_info)
+    return Program(text=text, stats=stats, warnings=warnings, blocks=blocks, frame=frame_info, ops=W.ops)
+
+
+def _parse_align(line: str) -> dict:
+    """ "ALIGNMENT/ROTATE,XPLUS,TO,LIN_B,ABOUT,ZPLUS" -> {kind, axis, feat, about} """
+    head, _, rest = line.partition(",")
+    kind = head.split("/")[1]
+    parts = [p.strip() for p in rest.split(",")]
+    if kind == "ROTATE":
+        return {"kind": kind, "axis": parts[0], "feat": parts[2], "about": parts[4]}
+    return {"kind": kind, "axis": parts[0], "feat": parts[1]}
 
 
 def _bbox_corners(fs: FeatureSet) -> list[Vec]:
@@ -433,6 +485,7 @@ def _emit_plane(W: Writer, name: str, F: PlaneFeature, fr: DatumFrame, hits: int
     for p in loc:
         _hit(W, p, n)
     W.sub("ENDMEAS/")
+    W.op("plane", id=name, centroid=list(c), normal=list(n), hits=[list(p) for p in loc])
     stats["hits"] += len(loc)
     stats["features"] += 1
 
@@ -452,6 +505,7 @@ def _emit_line(W: Writer, name: str, F: PlaneFeature, fr: DatumFrame, stats: dic
     _hit(W, l1, n)
     _hit(W, l2, n)
     W.sub("ENDMEAS/")
+    W.op("line", id=name, start=list(l1), end=list(l2), normal=list(n))
     stats["hits"] += 2
     stats["features"] += 1
 
@@ -468,6 +522,7 @@ def _emit_point(W: Writer, name: str, F: PlaneFeature, fr: DatumFrame, stats: di
     W.sub("MEAS/POINT,1,WORKPLANE")
     _hit(W, lp, n)
     W.sub("ENDMEAS/")
+    W.op("point", id=name, p=list(lp), normal=list(n))
     stats["hits"] += 1
     stats["features"] += 1
 
@@ -481,6 +536,8 @@ def _emit_circle(W: Writer, name: str, F: CylFeature, fr: DatumFrame, st: Settin
     io = "IN" if F.internal else "OUT"
     ang_vec = g.plane_basis(v)[0]
     depth = min(2.0, max(0.5, F.length * 0.2))
+    W.op("circle", id=name, center=list(c), vector=list(v), diam=d, inner=F.internal, hits=hits, depth=depth,
+         cylinder=cylinder, length=F.length, angle_vec=list(ang_vec))
     if cylinder:
         L = F.length
         end_off = depth
@@ -545,6 +602,8 @@ def _emit_dim(W: Writer, dn: str, it: PlanItem, F, fname: str, rname: str | None
         if fname.startswith("CYL"):
             W.raw(_dim_row("L", F.length, None, None, None))
         W.raw(f"END OF DIMENSION {dn}")
+        W.op("dim", kind="diameter", id=dn, feat=fname, label=f"{it.id} {it.label}",
+             nominal=it.nominal if it.nominal is not None else F.diameter, plus=up, minus=-lo)
     elif it.check == "position":
         ax = _inplane_axes(fr, F)
         loc = fr.to_local(F.entry)
@@ -558,6 +617,8 @@ def _emit_dim(W: Writer, dn: str, it: PlanItem, F, fname: str, rname: str | None
         W.raw(f"{'TP':<2}{mod:>11}{fmt(up):>11}{'':>11}{fmt(0.0):>11}{fmt(0.0):>11}{fmt(0.0):>11}"
               f"{fmt(0.0):>11} ----#----")
         W.raw(f"END OF DIMENSION {dn}")
+        W.op("dim", kind="position", id=dn, feat=fname, label=f"{it.id} {it.label}",
+             axes={"XYZ"[i]: loc[i] for i in ax}, diam=F.diameter, tol=up, modifier=mod, datums=list(it.datums))
         if it.datums:
             W.raw(f"{'':<12}COMMENT/REPT,")
             W.raw(f"{'':<12}Riferimenti {'|'.join(it.datums)}: coordinate teoriche nel sistema A_DCC")
@@ -568,6 +629,8 @@ def _emit_dim(W: Writer, dn: str, it: PlanItem, F, fname: str, rname: str | None
         W.raw(HEAD)
         W.raw(_dim_row("M", it.nominal, up, -lo, None))
         W.raw(f"END OF DIMENSION {dn}")
+        W.op("dim", kind="distance", id=dn, feat=fname, ref=rname, label=f"{it.id} {it.label}",
+             nominal=it.nominal, plus=up, minus=-lo)
     elif it.check in ("flatness", "cylindricity", "circularity"):
         what = {"flatness": "FLATNESS", "cylindricity": "CYLINDRICITY", "circularity": "ROUNDNESS"}[it.check]
         W.raw(f"DIM {dn}= {what} OF {_ftype(fname)} {fname}  UNITS={_u()} ,$")
@@ -575,6 +638,7 @@ def _emit_dim(W: Writer, dn: str, it: PlanItem, F, fname: str, rname: str | None
         W.raw(HEAD)
         W.raw(_dim_row("M", 0.0, up, 0.0, None))
         W.raw(f"END OF DIMENSION {dn}")
+        W.op("dim", kind=it.check, id=dn, feat=fname, label=f"{it.id} {it.label}", tol=up)
     elif it.check in ("perpendicularity", "parallelism", "concentricity"):
         ref = rname or "PLN_A"
         what = {"perpendicularity": "PERPENDICULARITY", "parallelism": "PARALLELISM",
@@ -584,6 +648,7 @@ def _emit_dim(W: Writer, dn: str, it: PlanItem, F, fname: str, rname: str | None
         W.raw(HEAD)
         W.raw(_dim_row("M", 0.0, up, 0.0, None))
         W.raw(f"END OF DIMENSION {dn}")
+        W.op("dim", kind=it.check, id=dn, feat=fname, ref=ref, label=f"{it.id} {it.label}", tol=up)
     else:
         W.raw(f"{'':<12}COMMENT/REPT,")
         W.raw(f"{'':<12}{it.label}: controllo da completare manualmente")

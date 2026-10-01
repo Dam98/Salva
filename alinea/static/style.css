@@ -138,3 +138,4 @@ legend { font-weight: 600; padding: 0 6px; }
 .login .field input { min-width: 0; width: 100%; }
 .srv-key { font-size: 13px; color: var(--muted); }
 .example-box { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.steps-list { line-height: 1.6; padding-left: 20px; }

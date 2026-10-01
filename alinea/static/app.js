@@ -454,6 +454,13 @@ function init() {
   });
   const part = () => ($("#partName").value || S.res.part_name || "PEZZO").replace(/[^\w.-]+/g, "_");
   $("#btnTxt").addEventListener("click", () => S.prog && download(`${part()}_PCDMIS.txt`, S.prog.program, "text/plain"));
+  $("#btnPrg").addEventListener("click", () => {
+    if (!S.prog || !S.prog.basic) return;
+    const name = `${part()}_crea_PRG.bas`;
+    download(name, S.prog.basic, "text/plain");
+    $("#prgName").textContent = name;
+    $("#dlgPrg").showModal();
+  });
   $("#btnCsv").addEventListener("click", () => S.prog && download(`${part()}_piano_controllo.csv`, S.prog.csv, "text/csv"));
   $("#btnCopy").addEventListener("click", async () => {
     if (!S.prog) return;

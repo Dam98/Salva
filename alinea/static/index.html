@@ -112,7 +112,8 @@
         <h3>Programma PC-DMIS</h3>
         <div class="btns">
           <button id="btnCopy" class="ghost small">Copia</button>
-          <button id="btnTxt" class="primary small">Scarica .txt</button>
+          <button id="btnPrg" class="primary small" title="Script che crea il programma .PRG dentro PC-DMIS">Scarica .PRG</button>
+          <button id="btnTxt" class="ghost small">Testo .txt</button>
           <button id="btnCsv" class="ghost small">Piano .csv</button>
         </div>
       </div>
@@ -174,6 +175,25 @@
       <button value="cancel" class="ghost">Annulla</button>
       <button id="btnSaveSettings" value="save" class="primary">Salva</button>
     </div>
+  </form>
+</dialog>
+
+<!-- ISTRUZIONI .PRG -->
+<dialog id="dlgPrg">
+  <form method="dialog">
+    <h2>Creare il programma .PRG in PC-DMIS</h2>
+    <p>Il .PRG è un formato chiuso di Hexagon: lo può scrivere solo PC-DMIS. Hai scaricato lo script
+      <b id="prgName"></b>, che lo crea dentro PC-DMIS in pochi secondi:</p>
+    <ol class="steps-list">
+      <li>In PC-DMIS apri l'<b>editor degli script BASIC</b> (menu <i>Strumenti › Editor script BASIC</i>,
+        in inglese <i>Tools › Basic Script Editor</i>).</li>
+      <li><b>File › Apri</b> e scegli il file scaricato, poi <b>Esegui</b> (F5).</li>
+      <li>Indica dove salvare il .PRG e se sei online o offline: lo script crea feature, allineamenti e
+        dimensioni, salva il programma e mostra un rapporto.</li>
+    </ol>
+    <p class="hint">Se qualche comando non riesce, il rapporto (e il file <i>.alinea.log</i> accanto al .PRG)
+      dice quale: mandamelo e lo sistemo. Prima del DCC verifica sempre il programma con la simulazione.</p>
+    <div class="row actions"><button value="ok" class="primary">Ho capito</button></div>
   </form>
 </dialog>
 

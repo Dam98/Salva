@@ -12,6 +12,7 @@ from .drawing_parser import Characteristic, parse_drawing_text
 from .drawing_reader import DrawingText, read_drawing
 from .matching import Plan, build_plan
 from .pcdmis import Settings, generate
+from .pcdmis_basic import build_basic
 from .step_reader import read_step
 
 Log = Callable[[str], None]
@@ -111,7 +112,7 @@ def make_program(fs: FeatureSet, plan_dict: dict, settings: dict) -> dict:
     prog = generate(fs, plan, st)
     csv_text = control_plan_csv(plan, prog.frame["names"], st.part_name)
     return {
-        "program": prog.text, "csv": csv_text, "stats": prog.stats, "warnings": prog.warnings,
+        "program": prog.text, "csv": csv_text, "basic": build_basic(prog.ops, st.part_name, st.probe), "stats": prog.stats, "warnings": prog.warnings,
         "blocks": prog.blocks, "names": prog.frame["names"],
         "frame": {k: (_r(v) if isinstance(v, tuple) else v) for k, v in prog.frame.items() if k != "names"},
         "local": {c.id: _r(_to_local(prog.frame, c.entry), 3) for c in fs.cylinders}

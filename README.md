@@ -102,8 +102,26 @@ illeggibile (font simbolici) → LlamaParse; se LlamaParse manca o fallisce → 
 
 ### Portare il programma in PC-DMIS
 
-Crea un programma nuovo in millimetri, apri la *Edit Window* in **modalità Comandi** e incolla il testo
-(oppure apri il `.txt` e copia da lì). Poi, **prima di lanciare in DCC**:
+**Scarica .PRG** — il .PRG è un formato binario chiuso di Hexagon, che solo PC-DMIS può scrivere. Alinea
+scarica quindi uno script PC-DMIS BASIC (`<pezzo>_crea_PRG.bas`) che crea il programma dentro PC-DMIS:
+
+1. In PC-DMIS apri l'editor degli script BASIC (*Strumenti › Editor script BASIC* / *Tools › Basic Script
+   Editor*).
+2. *File › Apri* lo script scaricato e premi *Esegui* (F5).
+3. Indica dove salvare il .PRG e se sei online o offline. Lo script crea feature automatiche (cerchi,
+   cilindri, piani), allineamento manuale e DCC, movimenti di sicurezza, cambi tastatore e dimensioni,
+   salva il programma e mostra un rapporto. Lo stesso rapporto è nel file `<programma>.PRG.alinea.log`.
+
+Lo script usa l'interfaccia di automazione documentata di PC-DMIS (`PartPrograms.Add`, `Commands.Add`,
+`FeatCmd`, `AlignCmnd`, `DimensionCmd`). Ogni comando è creato in modo protetto: se qualcosa non riesce,
+lo script prosegue e lo elenca nel rapporto. Due impostazioni non sono documentate da Hexagon (asse del
+LEVEL e modo DCC): lo script le imposta e poi le **verifica rileggendole**; se la verifica fallisce lo
+segnala. Il modificatore MMC/LMC delle localizzazioni va impostato a mano (c'è un commento nel programma).
+
+**Testo .txt** — in alternativa, lo stesso programma come testo dell'Edit Window, da incollare in un
+programma nuovo in *modalità Comandi*.
+
+Prima di lanciare in DCC, in entrambi i casi:
 
 - controlla che `LOADPROBE/PROBE1` sia il nome della tua configurazione tastatore
   (si imposta in ⚙ Impostazioni) e che i tip usati (`T1A0B0`, `T1A90B-90`, …) siano qualificati;
@@ -151,6 +169,7 @@ alinea/
   iso_tolerances.py ISO 286 (accoppiamenti) e ISO 2768 (tolleranze generali)
   matching.py       associazione disegno ↔ CAD, scelta dei riferimenti A/B/C
   pcdmis.py         sistema di riferimento, scelta tip, scrittura del programma
+  pcdmis_basic.py   script PC-DMIS BASIC che crea il .PRG dentro PC-DMIS
   control_plan.py   piano di controllo CSV
   server.py         server FastAPI (locale e modalità web con password)
   browser.py        punti di ingresso per la versione nel browser (Pyodide)
